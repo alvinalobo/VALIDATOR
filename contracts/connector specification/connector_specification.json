@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Connector Specification",
+  "description": "Standard contract for SIEM connectors used by The Validator.",
+  "type": "object",
+  "properties": {
+    "connector_name": {
+      "type": "string",
+      "description": "Name of the SIEM connector."
+    },
+    "connector_version": {
+      "type": "string",
+      "description": "Version of the connector."
+    },
+    "siem_platform": {
+      "type": "string",
+      "enum": [
+        "Splunk",
+        "Microsoft Sentinel",
+        "IBM QRadar",
+        "Elastic",
+        "crowdstrike"
+      ],
+      "description": "Target SIEM platform."
+    },
+    "supported_query_language": {
+      "type": "string",
+      "description": "Query language used by the SIEM."
+    },
+    "input_rule_format": {
+      "type": "string",
+      "enum": [
+        "Sigma"
+      ],
+      "description": "Accepted rule format."
+    },
+    "output_format": {
+      "type": "string",
+      "description": "Format of evidence returned by the connector."
+    },
+    "authentication": {
+      "type": "string",
+      "enum": [
+        "API Key",
+        "OAuth",
+        "Username/Password"
+      ],
+      "description": "Authentication method supported."
+    }
+  },
+  "required": [
+    "connector_name",
+    "connector_version",
+    "siem_platform",
+    "supported_query_language",
+    "input_rule_format",
+    "output_format",
+    "authentication"
+  ]
+}
