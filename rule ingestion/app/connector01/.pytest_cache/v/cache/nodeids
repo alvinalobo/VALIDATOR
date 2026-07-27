@@ -1,0 +1,18 @@
+[
+  "tests/test_connectors.py::test_elastic_eql_query",
+  "tests/test_connectors.py::test_elastic_kql_query",
+  "tests/test_connectors.py::test_elastic_language_detection[event.code: 4624 AND winlog.event_data.subStatus: 0xC000005E-kql]",
+  "tests/test_connectors.py::test_elastic_language_detection[file where file.extension == 'dll'-eql]",
+  "tests/test_connectors.py::test_elastic_language_detection[host.name: \"WORKSTATION-01\"-kql]",
+  "tests/test_connectors.py::test_elastic_language_detection[index=* | head 10-kql]",
+  "tests/test_connectors.py::test_elastic_language_detection[process where process.name == 'cmd.exe'-eql]",
+  "tests/test_connectors.py::test_elastic_language_detection[sequence by host.name [process where process.name == 'cmd.exe']-eql]",
+  "tests/test_connectors.py::test_elastic_validation_permanent_error",
+  "tests/test_connectors.py::test_elastic_validation_success",
+  "tests/test_connectors.py::test_elastic_validation_transient_retry_exhausted",
+  "tests/test_connectors.py::test_elastic_validation_transient_retry_success",
+  "tests/test_connectors.py::test_registry_integration",
+  "tests/test_connectors.py::test_splunk_integration_mode_query",
+  "tests/test_connectors.py::test_splunk_mock_mode_query",
+  "tests/test_connectors.py::test_splunk_poll_mechanism"
+]
