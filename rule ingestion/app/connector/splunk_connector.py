@@ -149,4 +149,6 @@ class SplunkConnector(BaseConnector):
         return results
 
 # Register Splunk Connector with the registry
+
 ConnectorRegistry.register("splunk", SplunkConnector)
+
