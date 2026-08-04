@@ -117,6 +117,13 @@ class ParsedRule(BaseModel):
         max_length=64,
         description="SHA-256 hash of rule content"
     )
+
+    version: int = Field(
+    default=1,
+    ge=1,
+    description="Current version of the rule"
+
+    )
     rule_format: RuleFormatEnum = Field(
         ...,
         description="Rule format type"
