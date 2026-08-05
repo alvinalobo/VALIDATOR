@@ -58,6 +58,10 @@ def parse_sigma_rule(content: str) -> Dict[str, Any]:
     if detection is None:
         raise SigmaParseError("Missing required field: 'detection'")
 
+    # --- ADD THIS LOGIC HERE ---
+    status = str(data.get("status", "")).lower()
+    is_active = status not in ("deprecated", "unsupported")
+
     return {
         "rule_id": data.get("id"),
         "title": title,
@@ -66,4 +70,5 @@ def parse_sigma_rule(content: str) -> Dict[str, Any]:
         "detection_logic": detection,
         "mitre_techniques": _extract_mitre_techniques(data.get("tags", [])),
         "raw": data,
+        "is_active": is_active, 
     }
