@@ -34,6 +34,9 @@ class ParsedRule(BaseModel):
     syntax_valid: bool = True
     validation_errors: List[str] = Field(default_factory=list)
 
+     # ADD THIS LINE HERE:
+    is_active: bool = Field(default=True, description="Indicates if the rule is active and should be loaded for checks")
+
     # Bookkeeping fields — useful for debugging/audit, safe to ignore downstream.
     file_path: Optional[str] = None
 
