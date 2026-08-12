@@ -3,6 +3,10 @@ from typing import List, Dict, Any
 import httpx
 
 from app.connector.base_connector import BaseConnector, ConnectorConfig
+from app.connector.exceptions import (
+    ConnectorTransientError,
+    ConnectorPermanentError,
+)
 
 
 class CrowdStrikeLogScaleConnector(BaseConnector):
@@ -45,6 +49,18 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
             f"{self.repository}/queryjobs/{job_id}"
         )
 
+    def _handle_http_error(self, error: httpx.HTTPStatusError) -> None:
+        status_code = error.response.status_code
+
+        if status_code == 429 or status_code >= 500:
+            raise ConnectorTransientError(
+                f"CrowdStrike LogScale API returned HTTP {status_code}"
+            ) from error
+
+        raise ConnectorPermanentError(
+            f"CrowdStrike LogScale API returned HTTP {status_code}"
+        ) from error
+
     def query(
         self,
         query_str: str,
@@ -65,14 +81,23 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
             "isLive": False,
         }
 
-        response = httpx.post(
-            self._get_query_url(),
-            headers=self._get_auth_headers(),
-            json=payload,
-            timeout=30.0,
-        )
+        try:
+            response = httpx.post(
+                self._get_query_url(),
+                headers=self._get_auth_headers(),
+                json=payload,
+                timeout=30.0,
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+
+        except httpx.HTTPStatusError as error:
+            self._handle_http_error(error)
+
+        except httpx.RequestError as error:
+            raise ConnectorTransientError(
+                "Failed to connect to CrowdStrike LogScale API"
+            ) from error
 
         result = response.json()
 
@@ -84,18 +109,37 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
         if not self._last_job_id:
             raise ValueError("No query job is available to poll")
 
-        response = httpx.get(
-            self._get_query_result_url(self._last_job_id),
-            headers=self._get_auth_headers(),
-            timeout=30.0,
-        )
+        try:
+            response = httpx.get(
+                self._get_query_result_url(self._last_job_id),
+                headers=self._get_auth_headers(),
+                timeout=30.0,
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+
+        except httpx.HTTPStatusError as error:
+            self._handle_http_error(error)
+
+        except httpx.RequestError as error:
+            raise ConnectorTransientError(
+                "Failed to connect to CrowdStrike LogScale API"
+            ) from error
 
         result = response.json()
 
         if isinstance(result, list):
             return result
+
+        if isinstance(result, dict):
+            if isinstance(result.get("events"), list):
+                return result["events"]
+
+            if isinstance(result.get("results"), list):
+                return result["results"]
+
+            if isinstance(result.get("data"), list):
+                return result["data"]
 
         return [result]
 
