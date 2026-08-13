@@ -1,6 +1,10 @@
 import httpx
 import pytest
 
+from app.connector.exceptions import (
+    ConnectorTransientError,
+    ConnectorPermanentError,
+)
 from app.connector.base_connector import ConnectorConfig
 from app.connector.crowdstrike_logscale_connector import (
     CrowdStrikeLogScaleConnector,
@@ -84,12 +88,9 @@ def test_poll_success(monkeypatch):
     connector = create_connector()
     connector._last_job_id = "test-job-id"
 
-    expected_response = {
-        "status": "completed",
-        "events": [
-            {"message": "test event"}
-        ],
-    }
+    expected_events = [
+        {"message": "test event"}
+    ]
 
     def mock_get(*args, **kwargs):
         assert args[0] == (
@@ -102,7 +103,10 @@ def test_poll_success(monkeypatch):
 
         return httpx.Response(
             200,
-            json=expected_response,
+            json={
+                "status": "completed",
+                "events": expected_events,
+            },
             request=httpx.Request("GET", args[0]),
         )
 
@@ -110,7 +114,7 @@ def test_poll_success(monkeypatch):
 
     result = connector.poll()
 
-    assert result == expected_response["events"]
+    assert result == expected_events
 
 
 def test_poll_without_job_id():
@@ -150,6 +154,7 @@ def test_validate_connection_failure(monkeypatch):
 
     assert connector.validate_connection() is False
 
+
 def test_query_raises_permanent_error_on_401(monkeypatch):
     connector = create_connector()
 
@@ -160,8 +165,6 @@ def test_query_raises_permanent_error_on_401(monkeypatch):
         )
 
     monkeypatch.setattr(httpx, "post", mock_post)
-
-    from app.connector.exceptions import ConnectorPermanentError
 
     with pytest.raises(ConnectorPermanentError):
         connector.query("hello", ("1h", "now"))
@@ -178,8 +181,6 @@ def test_query_raises_transient_error_on_500(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", mock_post)
 
-    from app.connector.exceptions import ConnectorTransientError
-
     with pytest.raises(ConnectorTransientError):
         connector.query("hello", ("1h", "now"))
 
@@ -194,8 +195,6 @@ def test_query_raises_transient_error_on_429(monkeypatch):
         )
 
     monkeypatch.setattr(httpx, "post", mock_post)
-
-    from app.connector.exceptions import ConnectorTransientError
 
     with pytest.raises(ConnectorTransientError):
         connector.query("hello", ("1h", "now"))
@@ -213,10 +212,9 @@ def test_poll_raises_permanent_error_on_404(monkeypatch):
 
     monkeypatch.setattr(httpx, "get", mock_get)
 
-    from app.connector.exceptions import ConnectorPermanentError
-
     with pytest.raises(ConnectorPermanentError):
         connector.poll()
+
 
 def test_query_raises_transient_error_on_network_failure(monkeypatch):
     connector = create_connector()
@@ -226,7 +224,76 @@ def test_query_raises_transient_error_on_network_failure(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", mock_post)
 
-    from app.connector.exceptions import ConnectorTransientError
-
     with pytest.raises(ConnectorTransientError):
         connector.query("hello", ("1h", "now"))
+
+
+def test_poll_returns_events_from_response(monkeypatch):
+    connector = create_connector()
+    connector._last_job_id = "test-job-id"
+
+    expected_events = [
+        {"message": "event one"},
+        {"message": "event two"},
+    ]
+
+    def mock_get(*args, **kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "events": expected_events,
+            },
+            request=httpx.Request("GET", args[0]),
+        )
+
+    monkeypatch.setattr(httpx, "get", mock_get)
+
+    result = connector.poll()
+
+    assert result == expected_events
+
+
+def test_poll_returns_list_response(monkeypatch):
+    connector = create_connector()
+    connector._last_job_id = "test-job-id"
+
+    expected_events = [
+        {"message": "event one"},
+        {"message": "event two"},
+    ]
+
+    def mock_get(*args, **kwargs):
+        return httpx.Response(
+            200,
+            json=expected_events,
+            request=httpx.Request("GET", args[0]),
+        )
+
+    monkeypatch.setattr(httpx, "get", mock_get)
+
+    result = connector.poll()
+
+    assert result == expected_events
+
+
+def test_poll_returns_dict_when_events_are_missing(monkeypatch):
+    connector = create_connector()
+    connector._last_job_id = "test-job-id"
+
+    expected_response = {
+        "status": "running",
+    }
+
+    def mock_get(*args, **kwargs):
+        return httpx.Response(
+            200,
+            json=expected_response,
+            request=httpx.Request("GET", args[0]),
+        )
+
+    monkeypatch.setattr(httpx, "get", mock_get)
+
+    result = connector.poll()
+
+    assert result == [expected_response]
