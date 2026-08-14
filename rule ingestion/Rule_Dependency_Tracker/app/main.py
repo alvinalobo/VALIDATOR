@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
 from app import models, schemas
-from app.crud import dependency
+from app.crud import dependency, rule
 
 Base.metadata.create_all(bind=engine)
 
@@ -15,7 +15,32 @@ def home():
     return {"message": "Rule Dependency Tracker is running"}
 
 
-@app.post("/dependencies", response_model=schemas.RuleDependencyResponse)
+# Rule APIs
+
+@app.post("/rules", response_model=schemas.RuleResponse)
+def create_rule(
+    rule_data: schemas.RuleCreate,
+    db: Session = Depends(get_db)
+):
+    return rule.create_rule(db, rule_data)
+
+
+@app.get("/rules")
+def get_rules(db: Session = Depends(get_db)):
+    return rule.get_all_rules(db)
+
+
+@app.get("/rules/{rule_id}", response_model=schemas.RuleResponse)
+def get_rule(rule_id: str, db: Session = Depends(get_db)):
+    return rule.get_rule_by_id(db, rule_id)
+
+
+# Dependency APIs
+
+@app.post(
+    "/dependencies",
+    response_model=schemas.RuleDependencyResponse
+)
 def create_dependency(
     dependency_data: schemas.RuleDependencyCreate,
     db: Session = Depends(get_db)
@@ -29,12 +54,18 @@ def get_dependencies(db: Session = Depends(get_db)):
 
 
 @app.get("/dependencies/{rule_id}")
-def get_dependency(rule_id: str, db: Session = Depends(get_db)):
+def get_dependency(
+    rule_id: str,
+    db: Session = Depends(get_db)
+):
     return dependency.get_dependency_by_rule(db, rule_id)
 
 
 @app.get("/dependencies/check/{rule_id}")
-def check_dependencies(rule_id: str, db: Session = Depends(get_db)):
+def check_dependencies(
+    rule_id: str,
+    db: Session = Depends(get_db)
+):
     return dependency.check_rule_dependencies(db, rule_id)
 
 

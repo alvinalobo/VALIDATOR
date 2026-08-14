@@ -70,7 +70,9 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
             raise ValueError("Query cannot be empty")
 
         if len(time_range) != 2:
-            raise ValueError("time_range must contain start and end values")
+            raise ValueError(
+                "time_range must contain start and end values"
+            )
 
         start, end = time_range
 
@@ -123,7 +125,7 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
 
         except httpx.RequestError as error:
             raise ConnectorTransientError(
-                "Failed to connect to CrowdStrike LogScale API"
+                "CrowdStrike LogScale request failed"
             ) from error
 
         result = response.json()
@@ -132,26 +134,35 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
             return result
 
         if isinstance(result, dict):
-            if isinstance(result.get("events"), list):
-                return result["events"]
+            events = result.get("events")
 
-            if isinstance(result.get("results"), list):
-                return result["results"]
+            if isinstance(events, list):
+                return events
 
-            if isinstance(result.get("data"), list):
-                return result["data"]
+            return [result]
 
-        return [result]
+        return []
 
     def validate_connection(self) -> bool:
         try:
             response = httpx.get(
-                self._get_query_url(),
-                headers=self._get_auth_headers(),
-                timeout=30.0,
-            )
+            self._get_query_url(),
+            headers=self._get_auth_headers(),
+            timeout=30.0,
+        )
 
             return response.status_code == 200
 
         except (httpx.HTTPError, ValueError):
+            return False
+
+        except httpx.HTTPStatusError as error:
+            self._handle_http_error(error)
+
+        except httpx.RequestError as error:
+            raise ConnectorTransientError(
+                "Failed to connect to CrowdStrike LogScale API"
+            ) from error
+
+        except ValueError:
             return False
