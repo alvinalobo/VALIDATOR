@@ -1,7 +1,7 @@
 import time
 import httpx
 from typing import List, Dict, Any, Optional
-from app.base_connector import BaseConnector, ConnectorConfig, ConnectorRegistry
+from app.connector.base_connector import BaseConnector, ConnectorConfig, ConnectorRegistry
 
 class SplunkConnector(BaseConnector):
     """
