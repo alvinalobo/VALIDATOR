@@ -5,7 +5,6 @@ from app.connector.splunk_connector import SplunkConnector
 from app.connector.elastic_connector import ElasticConnector, _detect_query_language
 from app.connector.exceptions import ConnectorTransientError, ConnectorPermanentError
 from tests.conftest import MOCK_SERVER_STATE
-
 # ----------------- SPLUNK TESTS -----------------
 
 def test_splunk_mock_mode_query():
