@@ -7,7 +7,7 @@ from app.connector.base_connector import ConnectorConfig
 # Credential fields each vendor's connector needs to function.
 # Add an entry here whenever a new connector is added to the framework.
 REQUIRED_CREDENTIAL_FIELDS: Dict[str, List[str]] = {
-    "splunk": ["base_url", "token"],
+    "splunk": ["host", "token"],
     "sentinel": ["workspace_id", "token"],
     "elastic": ["base_url", "api_key"],
     "qradar": ["base_url", "sec_token"],
