@@ -1,7 +1,8 @@
 import os
-import sys
 import pytest
 from fastapi.testclient import TestClient
+from app.main import app
+client = TestClient(app)
 # Configure python search path to root
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if root_dir not in sys.path:
