@@ -1,9 +1,9 @@
 import pytest
 import time
-from app.base_connector import ConnectorConfig, ConnectorRegistry
-from app.splunk_connector import SplunkConnector
-from app.elastic_connector import ElasticConnector, _detect_query_language
-from app.exceptions import ConnectorTransientError, ConnectorPermanentError
+from app.connector.base_connector import ConnectorConfig, ConnectorRegistry
+from app.connector.splunk_connector import SplunkConnector
+from app.connector.elastic_connector import ElasticConnector, _detect_query_language
+from app.connector.exceptions import ConnectorTransientError, ConnectorPermanentError
 from tests.conftest import MOCK_SERVER_STATE
 
 # ----------------- SPLUNK TESTS -----------------
