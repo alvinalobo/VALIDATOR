@@ -2,7 +2,11 @@ import os
 import sys
 import pytest
 import httpx
-from typing import Dict, Any
+from app.connector.base_connector import ConnectorConfig, ConnectorRegistry
+import app.connector.splunk_connector
+import app.connector.elastic_connector
+import app.connector.qradar_connector
+import app.connector.crowdstrike_logscale_connector
 
 # Configure python search path to root
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
