@@ -71,9 +71,9 @@ async def ingest_rules(req: RuleIngestRequest):
         
         parsed = None
         if f.endswith('.yml') or f.endswith('.yaml'):
-            parsed = parse_sigma(raw, h)
+            parsed = parse_sigma(raw)
         elif f.endswith('.kql'):
-            parsed = parse_kql(raw, h)
+            parsed = parse_kql(raw)
             
         if parsed:
             rules.append(parsed)
