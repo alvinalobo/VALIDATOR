@@ -15,7 +15,6 @@ if root_dir not in sys.path:
 
 from services.connector_framework.app.base_connector import ConnectorConfig, ConnectorRegistry
 import services.connector_framework.app.connectors.splunk_connector
-import services.connector_framework.app.connectors.sentinel_connector
 import services.connector_framework.app.connectors.elastic_connector
 import services.connector_framework.app.connectors.qradar_connector
 import services.connector_framework.app.connectors.crowdstrike_connector
@@ -43,19 +42,7 @@ def mock_send(self_client, request: httpx.Request, *args, **kwargs) -> MockRespo
     elif "/services/authentication/current-context" in url_str:
         return MockResponse(200, {})
 
-    # 2. Microsoft Sentinel Mock Sandbox Endpoints
-    elif "login.microsoftonline.com" in url_str:
-        return MockResponse(200, {"access_token": "sentinel-mock-access-token"})
-    elif "/v1/workspaces/workspace-id-123/query" in url_str:
-        return MockResponse(200, {
-            "tables": [
-                {
-                    "name": "PrimaryTable",
-                    "columns": [{"name": "Computer"}, {"name": "ProcessCommandLine"}],
-                    "rows": [["WORKSTATION-01", "msiexec.exe /i -install"]]
-                }
-            ]
-        })
+    
 
     # 3. Elastic Mock Sandbox Endpoints
     elif url_str.endswith("/_eql/search") or url_str.endswith("/_search"):
@@ -165,7 +152,7 @@ def test_crowdstrike_integration():
         product="logscale",
         credentials={"host": "https://crowdstrike-sandbox.internal", "token": "cs123", "mock": False}
     )
-    connector = ConnectorRegistry.get("crowdstrike")(config)
+    connector = ConnectorRegistry.get("crowdstrike_logscale")(config)
     assert connector.validate_connection() is True
     
     results = connector.query("#event_simpleName=*")
