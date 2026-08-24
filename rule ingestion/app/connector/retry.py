@@ -1,4 +1,3 @@
-
 import functools
 import logging
 import random
@@ -19,40 +18,86 @@ def with_retry(
     jitter: float = 0.25,
 ) -> Callable[[F], F]:
     """
-    Decorator: retry the wrapped call on ConnectorTransientError using
-    exponential backoff — delay doubles each attempt (base_delay,
-    2*base_delay, 4*base_delay, ...), capped at max_delay, with random
-    jitter added so multiple connectors backing off at once don't all
-    retry in lockstep and hammer the source simultaneously.
+    Retry a connector operation when a transient error occurs.
 
-    max_attempts counts the FIRST try, so max_attempts=4 means up to
-    3 retries after the initial attempt. On final failure, re-raises
-    the last ConnectorTransientError seen.
+    Retry strategy:
+        - Exponential backoff
+        - Maximum delay limit
+        - Random jitter to avoid synchronized retries
+
+    Args:
+        max_attempts:
+            Total number of attempts including the first attempt.
+
+        base_delay:
+            Initial retry delay in seconds.
+
+        max_delay:
+            Maximum retry delay in seconds.
+
+        jitter:
+            Random jitter percentage applied to the calculated delay.
+
+    Retries are performed only for ConnectorTransientError.
+
+    Permanent connector errors are propagated immediately.
     """
+
+    if max_attempts <= 0:
+        raise ValueError("max_attempts must be greater than 0")
+
+    if base_delay < 0:
+        raise ValueError("base_delay cannot be negative")
+
+    if max_delay < 0:
+        raise ValueError("max_delay cannot be negative")
+
+    if max_delay < base_delay:
+        raise ValueError("max_delay must be greater than or equal to base_delay")
+
+    if jitter < 0:
+        raise ValueError("jitter cannot be negative")
 
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_exc: ConnectorTransientError = None
             for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
+
                 except ConnectorTransientError as exc:
-                    last_exc = exc
                     if attempt == max_attempts:
                         logger.error(
                             "%s failed after %d attempts: %s",
-                            func.__qualname__, attempt, exc,
+                            func.__qualname__,
+                            attempt,
+                            exc,
                         )
                         raise
-                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                    delay += random.uniform(0, delay * jitter)
-                    logger.warning(
-                        "%s attempt %d/%d failed (%s); retrying in %.2fs",
-                        func.__qualname__, attempt, max_attempts, exc, delay,
+
+                    delay = min(
+                        base_delay * (2 ** (attempt - 1)),
+                        max_delay,
                     )
-                    time.sleep(delay)
-            raise last_exc
+
+                    if jitter > 0 and delay > 0:
+                        delay += random.uniform(
+                            0,
+                            delay * jitter,
+                        )
+
+                    logger.warning(
+                        "%s attempt %d/%d failed with transient error: %s. "
+                        "Retrying in %.2f seconds.",
+                        func.__qualname__,
+                        attempt,
+                        max_attempts,
+                        exc,
+                        delay,
+                    )
+
+                    if delay > 0:
+                        time.sleep(delay)
 
         return wrapper
 
