@@ -139,3 +139,5 @@ class ElasticConnector(BaseConnector):
         if resp.status_code in _RETRYABLE_STATUS_CODES:
             raise ConnectorTransientError(f"Elastic health check returned {resp.status_code}")
         return resp.status_code == 200
+
+ConnectorRegistry.register("elastic", ElasticConnector)
