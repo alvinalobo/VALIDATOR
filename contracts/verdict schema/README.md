@@ -1,10 +1,10 @@
 # Verdict Schema
- 
+
 ## Purpose
 This schema defines the standard format used by the Validation Engine to publish verdicts after validating detection rules.
- 
+
 ## Fields
- 
+
 | Field                  | Type           | Description                                           |
 |------------------------|----------------|-------------------------------------------------------|
 | action_id              | string         | Unique identifier of the simulated attack action       |
@@ -15,9 +15,9 @@ This schema defines the standard format used by the Validation Engine to publish
 | causal_chain           | array[string]  | Sequence of reasoning steps that produced the verdict  |
 | rule_id                | string         | Identifier of the validated rule                       |
 | technique_ref          | string         | MITRE ATT&CK technique reference                       |
- 
+
 ## Version
 Version: 1.0.0
- 
+
 ## Status
 Frozen for Week 1.

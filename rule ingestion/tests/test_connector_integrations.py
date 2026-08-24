@@ -5,20 +5,20 @@ import app.connector.splunk_connector
 import app.connector.elastic_connector
 import app.connector.qradar_connector
 import app.connector.crowdstrike_logscale_connector
- 
- 
+
+
 class MockResponse:
     def __init__(self, status_code, json_data):
         self.status_code = status_code
         self._json_data = json_data
- 
+
     def json(self):
         return self._json_data
- 
- 
+
+
 def mock_send(self_client, request, *args, **kwargs):
     url_str = str(request.url)
- 
+
     if "/services/search/jobs" in url_str:
         if "/results" in url_str:
             return MockResponse(200, {"results": [{"host": "WORKSTATION-01", "CommandLine": "vssadmin.exe -encrypt"}]})
@@ -44,15 +44,15 @@ def mock_send(self_client, request, *args, **kwargs):
             return MockResponse(201, {"search_id": "qradar-test-sid-456"})
     elif "/api/v1/repositories" in url_str:
         return MockResponse(200, [{"CommandLine": "msiexec.exe"}])
- 
+
     return MockResponse(404, {"error": "Endpoint not simulated"})
- 
- 
+
+
 @pytest.fixture(autouse=True)
 def mock_httpx_client(monkeypatch):
     monkeypatch.setattr(httpx.Client, "send", mock_send)
- 
- 
+
+
 def test_splunk_integration():
     config = ConnectorConfig(
         connector_id="splunk-es-prod",
@@ -62,12 +62,12 @@ def test_splunk_integration():
     )
     connector = ConnectorRegistry.get("splunk")(config)
     assert connector.validate_connection() is True
- 
+
     results = connector.query("index=windows CommandLine=*")
     assert len(results) == 1
     assert results[0]["host"] == "WORKSTATION-01"
- 
- 
+
+
 def test_elastic_integration():
     config = ConnectorConfig(
         connector_id="elastic-sec-prod",
@@ -77,12 +77,12 @@ def test_elastic_integration():
     )
     connector = ConnectorRegistry.get("elastic")(config)
     assert connector.validate_connection() is True
- 
+
     results = connector.query("process.name: *", (1000, 2000))
     assert len(results) == 1
     assert "vssadmin.exe" in results[0]["process"]["command_line"]
- 
- 
+
+
 def test_qradar_integration():
     config = ConnectorConfig(
         connector_id="qradar-ariel-prod",
@@ -92,12 +92,12 @@ def test_qradar_integration():
     )
     connector = ConnectorRegistry.get("qradar")(config)
     assert connector.validate_connection() is True
- 
+
     results = connector.query("SELECT * FROM events")
     assert len(results) == 1
     assert results[0]["payload"] == "modbus"
- 
- 
+
+
 def test_crowdstrike_integration():
     config = ConnectorConfig(
         connector_id="crowdstrike-lql-prod",

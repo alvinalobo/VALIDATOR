@@ -161,11 +161,10 @@ class ParsedRule(BaseModel):
         default_factory=datetime.utcnow,
         description="Timestamp of last rule modification"
     )
-        is_active: bool = Field(
+    is_active: bool = Field(
         default=True,
         description="Whether the rule is active (False if deprecated)"
     )
-
 
     @field_validator("mitre_techniques")
     @classmethod

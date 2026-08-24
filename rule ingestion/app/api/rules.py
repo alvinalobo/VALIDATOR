@@ -4,13 +4,16 @@ import os
 import hashlib
 import shutil
 import git
+
 from app.models.rule_models import RuleIngestRequest, ParsedRule
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
 
 router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
+
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
+
 def clone_repo(repo_url: str, branch: str = 'main') -> str:
     # If repo_url is a local path, use it directly
     if os.path.exists(repo_url) and os.path.isdir(repo_url):
@@ -34,6 +37,7 @@ def clone_repo(repo_url: str, branch: str = 'main') -> str:
             
     git.Repo.clone_from(repo_url, repo_path, branch=branch)
     return repo_path
+
 def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
     discovered = []
     for root, dirs, files in os.walk(repo_path):
@@ -49,6 +53,7 @@ def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
                 if file_lower.endswith('.kql'):
                     discovered.append(os.path.join(root, file))
     return sorted(discovered)
+
 @router.post("/ingest", response_model=List[ParsedRule])
 async def ingest_rules(req: RuleIngestRequest):
     try:
@@ -71,21 +76,23 @@ async def ingest_rules(req: RuleIngestRequest):
         
         parsed = None
         if f.endswith('.yml') or f.endswith('.yaml'):
-            parsed = parse_sigma(raw)
+            parsed = parse_sigma_rule(raw)
         elif f.endswith('.kql'):
-            parsed = parse_kql(raw)
+            parsed = parse_kql_rule(raw)
             
         if parsed:
             rules.append(parsed)
             # Store in database
-            INGESTED_RULES[parsed.rule_id] = parsed
+            INGESTED_RULES[parsed["rule_id"]] = parsed
             
     return rules
+
 @router.get("/{rule_id}", response_model=ParsedRule)
 async def get_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
     return INGESTED_RULES[rule_id]
+
 @router.post("/{rule_id}/deprecate")
 async def deprecate_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
@@ -97,13 +104,13 @@ async def deprecate_rule(rule_id: str):
         "rule_id": rule_id,
         "is_active": False
     }
+
 @router.get("/{rule_id}/dependencies")
 async def get_rule_dependencies(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
     
     # Mocking rule dependencies (historical validation runs that used this rule)
-    # If the rule is DET-002, return mock active checks
     if rule_id == "b2345678-9abc-def0-1234-56789abcdef0":
         return {
             "rule_id": rule_id,

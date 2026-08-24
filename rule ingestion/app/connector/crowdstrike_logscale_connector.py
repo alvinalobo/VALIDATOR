@@ -143,28 +143,26 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
 
         return []
 
-        def validate_connection(self) -> bool:
+    def validate_connection(self) -> bool:
         try:
             response = httpx.get(
                 self._get_query_url(),
                 headers=self._get_auth_headers(),
                 timeout=30.0,
             )
- 
+
             return response.status_code == 200
- 
+
         except (httpx.HTTPError, ValueError):
             return False
- 
+
         except httpx.HTTPStatusError as error:
             self._handle_http_error(error)
- 
+
         except httpx.RequestError as error:
             raise ConnectorTransientError(
                 "Failed to connect to CrowdStrike LogScale API"
             ) from error
-
-
 
         except ValueError:
             return False
