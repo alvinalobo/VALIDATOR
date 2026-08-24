@@ -4,14 +4,10 @@ import os
 import hashlib
 import shutil
 import git
-try:
-    from services.rule_ingestion.app.models import RuleIngestRequest, ParsedRule
-    from services.rule_ingestion.app.parsers.sigma_parser import parse_sigma
-    from services.rule_ingestion.app.parsers.kql_parser import parse_kql
-except ImportError:
-    from app.models import RuleIngestRequest, ParsedRule
-    from app.parsers.sigma_parser import parse_sigma
-    from app.parsers.kql_parser import parse_kql
+from app.models.rule_models import RuleIngestRequest, ParsedRule
+from app.services.sigma_parser import parse_sigma_rule
+from app.services.kql_parser import parse_kql_rule
+
 router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
