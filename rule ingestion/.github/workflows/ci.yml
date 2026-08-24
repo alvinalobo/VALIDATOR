@@ -33,4 +33,5 @@ jobs:
       run: |
         pytest
     - name: Build Docker Image
-       run: docker build -t rule-ingestion .
+      run: docker build -t rule-ingestion .
+
