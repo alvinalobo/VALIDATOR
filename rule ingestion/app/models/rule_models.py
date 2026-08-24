@@ -9,7 +9,7 @@ class RuleFormatEnum(str, Enum):
     YARA = "yara"
 
 
-RuleFormat = RuleFormatEnum"
+RuleFormat = RuleFormatEnum
 
 
 class RuleIngestRequest(BaseModel):
