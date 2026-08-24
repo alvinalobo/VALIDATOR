@@ -6,10 +6,10 @@ from typing import Any, Dict, List
 
 import requests
 
-from app.connector.base_connector import BaseConnector, ConnectorConfig
+from app.connector.base_connector import BaseConnector, ConnectorConfig, ConnectorRegistry
 try:
-    from app.exceptions import ConnectorPermanentError, ConnectorTransientError
-    from app.retry import with_retry
+    from app.connector.exceptions import ConnectorPermanentError, ConnectorTransientError
+    from app.connector.retry import with_retry
 except ImportError:
     # Fallback so this file works even before exceptions.py/retry.py exist.
     class ConnectorTransientError(Exception):
