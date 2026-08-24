@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 
 import httpx
 
-from app.connector.base_connector import BaseConnector, ConnectorConfig
+from app.connector.base_connector import BaseConnector, ConnectorConfig, ConnectorRegistry
 from app.connector.exceptions import (
     ConnectorTransientError,
     ConnectorPermanentError,
@@ -166,3 +166,7 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
 
         except ValueError:
             return False
+
+
+
+ConnectorRegistry.register("crowdstrike_logscale", CrowdStrikeLogScaleConnector)
