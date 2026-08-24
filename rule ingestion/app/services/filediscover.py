@@ -1,6 +1,6 @@
 from pathlib import Path
 import logging
-from git_clone import GitRepositoryCloner
+from app.services.git_clone import GitRepositoryCloner
 
 logging.basicConfig(
     level=logging.INFO,
