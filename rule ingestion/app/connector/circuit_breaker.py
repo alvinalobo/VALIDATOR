@@ -34,6 +34,11 @@ class CircuitBreakerError(Exception):
     pass
 
 
+class CircuitOpenError(CircuitBreakerError):
+    """Raised when the circuit is OPEN and requests are blocked."""
+    pass
+
+
 class CircuitBreaker:
     """
     Protects connectors from cascading failures.
@@ -52,10 +57,11 @@ class CircuitBreaker:
         self,
         failure_threshold: int = 5,
         cooldown_seconds: float = 60.0,
+        recovery_timeout: float = None,
         half_open_max_calls: int = 1,
     ):
         self.failure_threshold = failure_threshold
-        self.cooldown_seconds = cooldown_seconds
+        self.cooldown_seconds = recovery_timeout if recovery_timeout is not None else cooldown_seconds
         self.half_open_max_calls = half_open_max_calls
 
         self._state = CircuitState.CLOSED
@@ -63,6 +69,11 @@ class CircuitBreaker:
         self._success_count = 0
         self._last_failure_time: float = 0.0
         self._half_open_calls = 0
+
+    @property
+    def failure_count(self) -> int:
+        """Return the current consecutive failure count."""
+        return self._failure_count
 
     @property
     def state(self) -> CircuitState:
@@ -116,14 +127,14 @@ class CircuitBreaker:
         current_state = self.state
 
         if current_state == CircuitState.OPEN:
-            raise CircuitBreakerError(
+            raise CircuitOpenError(
                 f"Circuit breaker is OPEN. "
                 f"Retry after {self.cooldown_seconds}s cooldown."
             )
 
         if current_state == CircuitState.HALF_OPEN:
             if self._half_open_calls >= self.half_open_max_calls:
-                raise CircuitBreakerError(
+                raise CircuitOpenError(
                     "Circuit breaker HALF_OPEN: test call already in progress."
                 )
             self._half_open_calls += 1
