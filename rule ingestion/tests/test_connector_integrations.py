@@ -1,5 +1,7 @@
 import pytest
 import httpx
+import requests
+from typing import Any
 from app.connector.base_connector import ConnectorConfig, ConnectorRegistry
 import app.connector.splunk_connector
 import app.connector.elastic_connector
@@ -15,6 +17,14 @@ class MockResponse:
     def json(self):
         return self._json_data
 
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                "Error",
+                request=None,
+                response=self
+            )
+
 
 def mock_send(self_client, request, *args, **kwargs):
     url_str = str(request.url)
@@ -28,29 +38,61 @@ def mock_send(self_client, request, *args, **kwargs):
             return MockResponse(201, {"sid": "splunk-test-sid-123"})
     elif "/services/authentication/current-context" in url_str:
         return MockResponse(200, {})
-    elif "/_eql/search" in url_str or "/_search" in url_str:
-        return MockResponse(200, {
-            "hits": {
-                "events": [{"_source": {"process": {"command_line": "vssadmin.exe -encrypt"}}}],
-                "hits": [{"_source": {"process": {"command_line": "vssadmin.exe -encrypt"}}}]
-            }
-        })
     elif "/api/ariel/searches" in url_str:
         if "/results" in url_str:
             return MockResponse(200, {"events": [{"sourceip": "192.168.1.50", "payload": "modbus"}]})
         elif "qradar-test-sid-456" in url_str:
             return MockResponse(200, {"status": "COMPLETED"})
-        else:
+        elif request.method == "POST":
             return MockResponse(201, {"search_id": "qradar-test-sid-456"})
+        else:
+            return MockResponse(200, [])
     elif "/api/v1/repositories" in url_str:
-        return MockResponse(200, [{"CommandLine": "msiexec.exe"}])
+        if "/queryjobs/" in url_str:
+            # Polling endpoint
+            return MockResponse(200, [{"CommandLine": "msiexec.exe"}])
+        else:
+            # Query start / health check endpoint
+            if request.method == "POST":
+                return MockResponse(200, {"id": "cs-job-id"})
+            else:
+                return MockResponse(200, {})
 
     return MockResponse(404, {"error": "Endpoint not simulated"})
 
 
+class MockRequestsResponse:
+    def __init__(self, status_code: int, json_data: Any):
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = ""
+
+    def json(self) -> Any:
+        return self._json_data
+
+
+def mock_requests_post(self_session, url: str, json: Any = None, **kwargs) -> MockRequestsResponse:
+    if "/_eql/search" in url or "/_search" in url:
+        return MockRequestsResponse(200, {
+            "hits": {
+                "events": [{"_source": {"process": {"command_line": "vssadmin.exe -encrypt"}}}],
+                "hits": [{"_source": {"process": {"command_line": "vssadmin.exe -encrypt"}}}]
+            }
+        })
+    return MockRequestsResponse(404, {})
+
+
+def mock_requests_get(self_session, url: str, **kwargs) -> MockRequestsResponse:
+    if "/_cluster/health" in url:
+        return MockRequestsResponse(200, {})
+    return MockRequestsResponse(404, {})
+
+
 @pytest.fixture(autouse=True)
-def mock_httpx_client(monkeypatch):
+def mock_all_clients(monkeypatch):
     monkeypatch.setattr(httpx.Client, "send", mock_send)
+    monkeypatch.setattr(requests.Session, "post", mock_requests_post)
+    monkeypatch.setattr(requests.Session, "get", mock_requests_get)
 
 
 def test_splunk_integration():
@@ -107,6 +149,14 @@ def test_crowdstrike_integration():
         scope={"repository": "default"}
     )
     connector = ConnectorRegistry.get("crowdstrike_logscale")(config)
-    results = connector.query("#event_simpleName=*", ("1h", "now"))
+    assert connector.validate_connection() is True
+
+    # Initiate asynchronous query
+    query_res = connector.query("#event_simpleName=*", ("1h", "now"))
+    assert len(query_res) == 1
+    assert query_res[0]["id"] == "cs-job-id"
+
+    # Poll for events
+    results = connector.poll()
     assert len(results) == 1
     assert results[0]["CommandLine"] == "msiexec.exe"
