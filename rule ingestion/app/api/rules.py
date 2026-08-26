@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Dict
+from fastapi import APIRouter, HTTPException, Query
+from typing import List, Dict, Optional
 import os
 import hashlib
 import shutil
 import git
 
-from app.models.rule_models import RuleIngestRequest, ParsedRule
+from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
 
@@ -74,64 +74,60 @@ async def ingest_rules(req: RuleIngestRequest):
             
         h = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         
-        parsed = None
-        if f.endswith('.yml') or f.endswith('.yaml'):
-            parsed = parse_sigma_rule(raw)
-        elif f.endswith('.kql'):
-            parsed = parse_kql_rule(raw)
+        parsed_dict = None
+        rule_format = None
+        error_msg = None
+        try:
+            if f.endswith('.yml') or f.endswith('.yaml'):
+                parsed_dict = parse_sigma_rule(raw)
+                rule_format = RuleFormatEnum.SIGMA
+            elif f.endswith('.kql'):
+                parsed_dict = parse_kql_rule(raw)
+                rule_format = RuleFormatEnum.KQL
+        except Exception as e:
+            error_msg = str(e)
+            rule_format = RuleFormatEnum.SIGMA if (f.endswith('.yml') or f.endswith('.yaml')) else RuleFormatEnum.KQL
             
-        if parsed:
+        if parsed_dict:
+            raw_data = parsed_dict.get("raw", {})
+            tags = [str(t) for t in raw_data.get("tags", [])] if isinstance(raw_data.get("tags"), list) else []
+            severity = raw_data.get("severity") or raw_data.get("level")
+            
+            parsed = ParsedRule(
+                rule_id=parsed_dict.get("rule_id") or "UNKNOWN",
+                title=parsed_dict["title"],
+                description=parsed_dict.get("description"),
+                author=parsed_dict.get("author"),
+                content_hash=h,
+                rule_format=rule_format,
+                mitre_techniques=parsed_dict.get("mitre_techniques") or [],
+                detection_logic=parsed_dict.get("detection_logic"),
+                syntax_valid=True,
+                validation_errors=[],
+                severity=severity,
+                tags=tags,
+                is_active=parsed_dict.get("is_active", True)
+            )
             rules.append(parsed)
             # Store in database
-            INGESTED_RULES[parsed["rule_id"]] = parsed
+            INGESTED_RULES[parsed.rule_id] = parsed
+        elif error_msg:
+            parsed = ParsedRule(
+                rule_id="UNKNOWN",
+                title="UNKNOWN",
+                content_hash=h,
+                rule_format=rule_format,
+                syntax_valid=False,
+                validation_errors=[error_msg],
+                is_active=True
+            )
+            rules.append(parsed)
             
     return rules
 
-@router.get("/{rule_id}", response_model=ParsedRule)
-async def get_rule(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-    return INGESTED_RULES[rule_id]
-
-@router.post("/{rule_id}/deprecate")
-async def deprecate_rule(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-    rule = INGESTED_RULES[rule_id]
-    rule.is_active = False
-    return {
-        "message": f"Rule '{rule_id}' was successfully deprecated.",
-        "rule_id": rule_id,
-        "is_active": False
-    }
-
-@router.get("/{rule_id}/dependencies")
-async def get_rule_dependencies(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-    
-    # Mocking rule dependencies (historical validation runs that used this rule)
-    if rule_id == "b2345678-9abc-def0-1234-56789abcdef0":
-        return {
-            "rule_id": rule_id,
-            "dependencies": [
-                {"run_id": "run-001", "action_id": "act-501", "status": "active"},
-                {"run_id": "run-002", "action_id": "act-502", "status": "completed"}
-            ]
-        }
-    
-    return {
-        "rule_id": rule_id,
-        "dependencies": []
-    }
-
-
 # ============================================================
-# RULE SEARCH / FILTER / PAGINATION API
+# RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
 # ============================================================
-
-from fastapi import Query
-
 
 @router.get("/search", response_model=List[ParsedRule])
 async def search_rules(
@@ -186,7 +182,7 @@ async def search_rules(
     if rule_format:
         results = [
             r for r in results
-            if r.rule_format.value == rule_format.lower()
+            if r.rule_format and r.rule_format.value == rule_format.lower()
         ]
 
     # --- Sorting ---
@@ -206,3 +202,41 @@ async def search_rules(
     paginated = results[start:end]
 
     return paginated
+
+@router.get("/{rule_id}", response_model=ParsedRule)
+async def get_rule(rule_id: str):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    return INGESTED_RULES[rule_id]
+
+@router.post("/{rule_id}/deprecate")
+async def deprecate_rule(rule_id: str):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    rule = INGESTED_RULES[rule_id]
+    rule.is_active = False
+    return {
+        "message": f"Rule '{rule_id}' was successfully deprecated.",
+        "rule_id": rule_id,
+        "is_active": False
+    }
+
+@router.get("/{rule_id}/dependencies")
+async def get_rule_dependencies(rule_id: str):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    
+    # Mocking rule dependencies (historical validation runs that used this rule)
+    if rule_id == "b2345678-9abc-def0-1234-56789abcdef0":
+        return {
+            "rule_id": rule_id,
+            "dependencies": [
+                {"run_id": "run-001", "action_id": "act-501", "status": "active"},
+                {"run_id": "run-002", "action_id": "act-502", "status": "completed"}
+            ]
+        }
+    
+    return {
+        "rule_id": rule_id,
+        "dependencies": []
+    }
