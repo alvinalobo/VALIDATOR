@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException, Query
-from typing import List, Dict, Optional
+from fastapi import APIRouter, HTTPException
+from typing import List, Dict
 import os
 import hashlib
 import shutil
 import git
 
-from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum
+from app.models.rule_models import RuleIngestRequest, ParsedRule
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
 
@@ -74,62 +74,37 @@ async def ingest_rules(req: RuleIngestRequest):
             
         h = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         
-        parsed_dict = None
-        rule_format = None
-        error_msg = None
-        try:
-            if f.endswith('.yml') or f.endswith('.yaml'):
-                parsed_dict = parse_sigma_rule(raw)
-                rule_format = RuleFormatEnum.SIGMA
-            elif f.endswith('.kql'):
-                parsed_dict = parse_kql_rule(raw)
-                rule_format = RuleFormatEnum.KQL
-        except Exception as e:
-            error_msg = str(e)
-            rule_format = RuleFormatEnum.SIGMA if (f.endswith('.yml') or f.endswith('.yaml')) else RuleFormatEnum.KQL
+        parsed = None
+        if f.endswith('.yml') or f.endswith('.yaml'):
+            parsed = parse_sigma_rule(raw)
+        elif f.endswith('.kql'):
+            parsed = parse_kql_rule(raw)
             
-        if parsed_dict:
-            raw_data = parsed_dict.get("raw", {})
-            tags = [str(t) for t in raw_data.get("tags", [])] if isinstance(raw_data.get("tags"), list) else []
-            severity = raw_data.get("severity") or raw_data.get("level")
-            
-            parsed = ParsedRule(
-                rule_id=parsed_dict.get("rule_id") or "UNKNOWN",
-                title=parsed_dict["title"],
-                description=parsed_dict.get("description"),
-                author=parsed_dict.get("author"),
-                content_hash=h,
-                rule_format=rule_format,
-                mitre_techniques=parsed_dict.get("mitre_techniques") or [],
-                detection_logic=parsed_dict.get("detection_logic"),
-                syntax_valid=True,
-                validation_errors=[],
-                severity=severity,
-                tags=tags,
-                is_active=parsed_dict.get("is_active", True)
-            )
+        if parsed:
             rules.append(parsed)
             # Store in database
-            INGESTED_RULES[parsed.rule_id] = parsed
-        elif error_msg:
-            parsed = ParsedRule(
-                rule_id="UNKNOWN",
-                title="UNKNOWN",
-                content_hash=h,
-                rule_format=rule_format,
-                syntax_valid=False,
-                validation_errors=[error_msg],
-                is_active=True
-            )
-            rules.append(parsed)
+            INGESTED_RULES[parsed["rule_id"]] = parsed
             
     return rules
 
 # ============================================================
-# RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
+# RULE SEARCH / FILTER / PAGINATION API
 # ============================================================
 
-@router.get("/search", response_model=List[ParsedRule])
+from fastapi import Query
+from math import ceil
+from pydantic import BaseModel
+
+
+class RuleSearchResponse(BaseModel):
+    items: List[ParsedRule]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@router.get("/search", response_model=RuleSearchResponse)
 async def search_rules(
     q: str = Query(default="", description="Search term (matches title, description, tags)"),
     status: str = Query(default=None, description="Filter by status: active, deprecated"),
@@ -158,10 +133,16 @@ async def search_rules(
 
     # --- Filter by status ---
     if status:
-        if status.lower() == "active":
+        status_value = status.lower()
+        if status_value == "active":
             results = [r for r in results if r.is_active]
-        elif status.lower() == "deprecated":
+        elif status_value == "deprecated":
             results = [r for r in results if not r.is_active]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="status must be one of: active, deprecated",
+            )
 
     # --- Filter by severity ---
     if severity:
@@ -180,9 +161,16 @@ async def search_rules(
 
     # --- Filter by rule format ---
     if rule_format:
+        format_value = rule_format.lower()
+        allowed_formats = {"sigma", "kql", "yara"}
+        if format_value not in allowed_formats:
+            raise HTTPException(
+                status_code=400,
+                detail="rule_format must be one of: sigma, kql, yara",
+            )
         results = [
             r for r in results
-            if r.rule_format and r.rule_format.value == rule_format.lower()
+            if r.rule_format.value == format_value
         ]
 
     # --- Sorting ---
@@ -191,8 +179,20 @@ async def search_rules(
         "updated_at": lambda r: r.updated_at,
         "title": lambda r: (r.title or "").lower(),
     }
-    sort_fn = sort_fields.get(sort_by, sort_fields["created_at"])
-    reverse = sort_order.lower() == "desc"
+    sort_by_value = sort_by.lower()
+    if sort_by_value not in sort_fields:
+        raise HTTPException(
+            status_code=400,
+            detail="sort_by must be one of: created_at, updated_at, title",
+        )
+    sort_order_value = sort_order.lower()
+    if sort_order_value not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=400,
+            detail="sort_order must be one of: asc, desc",
+        )
+    sort_fn = sort_fields[sort_by_value]
+    reverse = sort_order_value == "desc"
     results.sort(key=sort_fn, reverse=reverse)
 
     # --- Pagination ---
@@ -201,7 +201,16 @@ async def search_rules(
     end = start + page_size
     paginated = results[start:end]
 
-    return paginated
+    total_pages = ceil(total / page_size) if total else 0
+
+    return {
+        "items": paginated,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
 
 @router.get("/{rule_id}", response_model=ParsedRule)
 async def get_rule(rule_id: str):
@@ -240,3 +249,5 @@ async def get_rule_dependencies(rule_id: str):
         "rule_id": rule_id,
         "dependencies": []
     }
+
+
