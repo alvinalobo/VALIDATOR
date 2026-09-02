@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException
-from typing import List, Dict
+import math
+from math import ceil
+from fastapi import APIRouter, HTTPException, Query, Response
+from typing import List, Dict, Optional, Union
 import os
 import hashlib
 import shutil
 import git
 
-from app.models.rule_models import RuleIngestRequest, ParsedRule
+from pydantic import BaseModel
+from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum, PaginatedRuleResponse
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
 
@@ -13,6 +16,13 @@ router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
 
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
+
+class RuleSearchResponse(BaseModel):
+    items: List[ParsedRule]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 def clone_repo(repo_url: str, branch: str = 'main') -> str:
     # If repo_url is a local path, use it directly
@@ -74,38 +84,64 @@ async def ingest_rules(req: RuleIngestRequest):
             
         h = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         
-        parsed = None
-        if f.endswith('.yml') or f.endswith('.yaml'):
-            parsed = parse_sigma_rule(raw)
-        elif f.endswith('.kql'):
-            parsed = parse_kql_rule(raw)
+        parsed_dict = None
+        rule_format = None
+        error_msg = None
+        try:
+            if f.endswith('.yml') or f.endswith('.yaml'):
+                parsed_dict = parse_sigma_rule(raw)
+                rule_format = RuleFormatEnum.SIGMA
+            elif f.endswith('.kql'):
+                parsed_dict = parse_kql_rule(raw)
+                rule_format = RuleFormatEnum.KQL
+        except Exception as e:
+            error_msg = str(e)
+            rule_format = RuleFormatEnum.SIGMA if (f.endswith('.yml') or f.endswith('.yaml')) else RuleFormatEnum.KQL
             
-        if parsed:
+        if parsed_dict:
+            raw_data = parsed_dict.get("raw", {})
+            tags = [str(t) for t in raw_data.get("tags", [])] if isinstance(raw_data.get("tags"), list) else []
+            severity = raw_data.get("severity") or raw_data.get("level")
+            
+            parsed = ParsedRule(
+                rule_id=parsed_dict.get("rule_id") or "UNKNOWN",
+                title=parsed_dict["title"],
+                description=parsed_dict.get("description"),
+                author=parsed_dict.get("author"),
+                content_hash=h,
+                rule_format=rule_format,
+                mitre_techniques=parsed_dict.get("mitre_techniques") or [],
+                detection_logic=parsed_dict.get("detection_logic"),
+                syntax_valid=True,
+                validation_errors=[],
+                severity=severity,
+                tags=tags,
+                is_active=parsed_dict.get("is_active", True)
+            )
             rules.append(parsed)
             # Store in database
-            INGESTED_RULES[parsed["rule_id"]] = parsed
+            INGESTED_RULES[parsed.rule_id] = parsed
+        elif error_msg:
+            parsed = ParsedRule(
+                rule_id="UNKNOWN",
+                title="UNKNOWN",
+                content_hash=h,
+                rule_format=rule_format,
+                syntax_valid=False,
+                validation_errors=[error_msg],
+                is_active=True
+            )
+            rules.append(parsed)
             
     return rules
 
 # ============================================================
-# RULE SEARCH / FILTER / PAGINATION API
+# RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
 # ============================================================
 
-from fastapi import Query
-from math import ceil
-from pydantic import BaseModel
-
-
-class RuleSearchResponse(BaseModel):
-    items: List[ParsedRule]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
-
-
-@router.get("/search", response_model=RuleSearchResponse)
+@router.get("/search", response_model=Union[RuleSearchResponse, PaginatedRuleResponse, List[ParsedRule]])
 async def search_rules(
+    response: Response = None,
     q: str = Query(default="", description="Search term (matches title, description, tags)"),
     status: str = Query(default=None, description="Filter by status: active, deprecated"),
     severity: str = Query(default=None, description="Filter by severity: low, medium, high, critical"),
@@ -115,6 +151,7 @@ async def search_rules(
     page_size: int = Query(default=20, ge=1, le=100, description="Results per page"),
     sort_by: str = Query(default="created_at", description="Sort field: created_at, updated_at, title"),
     sort_order: str = Query(default="desc", description="Sort direction: asc, desc"),
+    paginated: bool = Query(default=False, description="Whether to return a structured pagination envelope object"),
 ):
     """
     Search and filter rules with pagination and sorting.
@@ -170,7 +207,7 @@ async def search_rules(
             )
         results = [
             r for r in results
-            if r.rule_format.value == format_value
+            if r.rule_format and r.rule_format.value == format_value
         ]
 
     # --- Sorting ---
@@ -197,20 +234,34 @@ async def search_rules(
 
     # --- Pagination ---
     total = len(results)
+    total_pages = ceil(total / page_size) if total else 0
     start = (page - 1) * page_size
     end = start + page_size
-    paginated = results[start:end]
+    paginated_items = results[start:end]
 
-    total_pages = ceil(total / page_size) if total else 0
+    has_next = page < total_pages
+    has_prev = page > 1 and total_pages > 0
 
-    return {
-        "items": paginated,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-    }
+    if response:
+        response.headers["X-Total-Count"] = str(total)
+        response.headers["X-Page"] = str(page)
+        response.headers["X-Page-Size"] = str(page_size)
+        response.headers["X-Total-Pages"] = str(total_pages)
+        response.headers["X-Has-Next"] = "true" if has_next else "false"
+        response.headers["X-Has-Prev"] = "true" if has_prev else "false"
 
+    if paginated:
+        return PaginatedRuleResponse(
+            items=paginated_items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            has_next=has_next,
+            has_prev=has_prev
+        )
+
+    return paginated_items
 
 @router.get("/{rule_id}", response_model=ParsedRule)
 async def get_rule(rule_id: str):
@@ -249,5 +300,3 @@ async def get_rule_dependencies(rule_id: str):
         "rule_id": rule_id,
         "dependencies": []
     }
-
-
