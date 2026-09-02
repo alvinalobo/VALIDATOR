@@ -309,3 +309,24 @@ class BulkValidationResponse(BaseModel):
         default_factory=datetime.utcnow,
         description="When validation completed"
     )
+
+class PaginatedRuleResponse(BaseModel):
+    """
+    Response model for paginated rule search queries.
+
+    Attributes:
+        items: List of ParsedRule items for the requested page
+        total: Total number of matching rules
+        page: Current page number (1-indexed)
+        page_size: Number of items per page
+        total_pages: Total number of pages available
+        has_next: Whether a next page exists
+        has_prev: Whether a previous page exists
+    """
+    items: List[ParsedRule] = Field(default_factory=list, description="Rules for current page")
+    total: int = Field(..., ge=0, description="Total matching rules count")
+    page: int = Field(..., ge=1, description="Current page number")
+    page_size: int = Field(..., ge=1, description="Items per page")
+    total_pages: int = Field(..., ge=0, description="Total pages available")
+    has_next: bool = Field(..., description="Whether a next page exists")
+    has_prev: bool = Field(..., description="Whether a previous page exists")
