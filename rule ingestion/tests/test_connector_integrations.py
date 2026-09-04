@@ -7,6 +7,7 @@ import app.connector.splunk_connector
 import app.connector.elastic_connector
 import app.connector.qradar_connector
 import app.connector.crowdstrike_logscale_connector
+import app.connector.sentinel_connector
 
 
 class MockResponse:
@@ -160,3 +161,22 @@ def test_crowdstrike_integration():
     results = connector.poll()
     assert len(results) == 1
     assert results[0]["CommandLine"] == "msiexec.exe"
+
+def test_sentinel_integration():
+    config = ConnectorConfig(
+        connector_id="sentinel-sandbox",
+        vendor="sentinel",
+        product="microsoft_sentinel",
+        credentials={
+            "mock": True
+        }
+    )
+
+    connector = ConnectorRegistry.get("sentinel")(config)
+
+    assert connector.validate_connection() is True
+
+    results = connector.query("powershell")
+
+    assert len(results) == 1
+    assert results[0]["FileName"] == "powershell.exe"
