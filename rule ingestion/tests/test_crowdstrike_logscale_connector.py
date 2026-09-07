@@ -142,6 +142,7 @@ def test_validate_connection_success(monkeypatch):
 
 
 def test_validate_connection_failure(monkeypatch):
+    """Bad credentials are a permanent error — surfaced loudly, not hidden."""
     connector = create_connector()
 
     def mock_get(*args, **kwargs):
@@ -152,7 +153,10 @@ def test_validate_connection_failure(monkeypatch):
 
     monkeypatch.setattr(httpx, "get", mock_get)
 
-    assert connector.validate_connection() is False
+    # The resilience layer keeps permanent (config/credential) errors
+    # visible while only transient failures fall back to False.
+    with pytest.raises(ConnectorPermanentError):
+        connector.validate_connection()
 
 
 def test_query_raises_permanent_error_on_401(monkeypatch):
@@ -170,8 +174,13 @@ def test_query_raises_permanent_error_on_401(monkeypatch):
         connector.query("hello", ("1h", "now"))
 
 
-def test_query_raises_transient_error_on_500(monkeypatch):
+def test_query_uses_fallback_on_500(monkeypatch):
+    """Transient 500s exhaust retries, then gracefully fall back to []."""
     connector = create_connector()
+    # Run retries instantly (no backoff sleeps)
+    connector.resilience.base_delay = 0
+    connector.resilience.max_delay = 0
+    connector.resilience.jitter = 0
 
     def mock_post(*args, **kwargs):
         return httpx.Response(
@@ -181,12 +190,16 @@ def test_query_raises_transient_error_on_500(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", mock_post)
 
-    with pytest.raises(ConnectorTransientError):
-        connector.query("hello", ("1h", "now"))
+    assert connector.query("hello", ("1h", "now")) == []
 
 
-def test_query_raises_transient_error_on_429(monkeypatch):
+def test_query_uses_fallback_on_429(monkeypatch):
+    """Rate-limited requests exhaust retries, then gracefully fall back to []."""
     connector = create_connector()
+    # Run retries instantly (no backoff sleeps)
+    connector.resilience.base_delay = 0
+    connector.resilience.max_delay = 0
+    connector.resilience.jitter = 0
 
     def mock_post(*args, **kwargs):
         return httpx.Response(
@@ -196,8 +209,7 @@ def test_query_raises_transient_error_on_429(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", mock_post)
 
-    with pytest.raises(ConnectorTransientError):
-        connector.query("hello", ("1h", "now"))
+    assert connector.query("hello", ("1h", "now")) == []
 
 
 def test_poll_raises_permanent_error_on_404(monkeypatch):
@@ -216,16 +228,20 @@ def test_poll_raises_permanent_error_on_404(monkeypatch):
         connector.poll()
 
 
-def test_query_raises_transient_error_on_network_failure(monkeypatch):
+def test_query_uses_fallback_on_network_failure(monkeypatch):
+    """Network failures exhaust retries, then gracefully fall back to []."""
     connector = create_connector()
+    # Run retries instantly (no backoff sleeps)
+    connector.resilience.base_delay = 0
+    connector.resilience.max_delay = 0
+    connector.resilience.jitter = 0
 
     def mock_post(*args, **kwargs):
         raise httpx.ConnectError("Connection failed")
 
     monkeypatch.setattr(httpx, "post", mock_post)
 
-    with pytest.raises(ConnectorTransientError):
-        connector.query("hello", ("1h", "now"))
+    assert connector.query("hello", ("1h", "now")) == []
 
 
 def test_poll_returns_events_from_response(monkeypatch):

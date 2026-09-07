@@ -19,7 +19,14 @@ def create_splunk_connector():
         },
     )
 
-    return SplunkConnector(config)
+    connector = SplunkConnector(config)
+
+    # Make resilience tests fast.
+    connector.resilience.base_delay = 0
+    connector.resilience.max_delay = 0
+    connector.resilience.jitter = 0
+
+    return connector
 
 
 def test_query_fallback_after_timeout(monkeypatch):

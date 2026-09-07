@@ -12,10 +12,29 @@ suite (48 tests) against the Connector Framework's mock SIEM HTTP server.
 
 | Metric | Before | After |
 |---|---|---|
-| `pytest tests/` | 10 failed / 37 passed | **48 passed** (stable across 6+ consecutive runs) |
-| Runtime | ~8.5 s (with real network calls) | ~3.2 s |
-| `pytest app/connector/tests/` | n/a | **16 passed** |
+| `pytest tests/` | 10 failed / 37 passed | **all pass** |
+| `pytest tests/ app/connector/tests/` | mixed failures | **106 passed** (stable across consecutive runs) |
+| Runtime | ~8.5–59 s (real network calls / retry backoff sleeps) | **~4 s** |
 | CI workflow | Located in a subdirectory — **never executed by GitHub** | Moved to repo root, paths fixed |
+
+Note: between the initial review and the final push, the repository gained 18
+new commits (uploaded via the GitHub web UI) that added a resilience framework
+(circuit breaker + retry + graceful fallback), a Microsoft Sentinel connector,
+rule search/filtering endpoints, and their tests. This review's fixes were
+re-based on top of that work; the connectors' error-handling fixes were already
+re-implemented in the new code (in a cleaner form), and the remaining issues
+found in the new commits were fixed here:
+
+- `test_crowdstrike_logscale_connector.py` still asserted the pre-resilience
+  contract (transient errors propagated; 401 returned `False`). Updated to the
+  resilience contract: transient failures retry then fall back to `[]`,
+  permanent credential errors surface as `ConnectorPermanentError`.
+- `test_rule_search.py` expected the pagination envelope by default while
+  `test_rule_filtering.py` expected the raw list; the route's explicit design
+  (raw list by default, `paginated=true` for the envelope) is now documented
+  and the search tests pass `paginated=true`.
+- `test_splunk_resilience.py` was the only resilience test factory that did not
+  zero the retry backoff, making the suite ~55 s slower than needed. Fixed.
 
 The Rule Ingestion Service integration tests
 (`tests/test_connector_integrations.py`) previously could not run against the
@@ -161,17 +180,16 @@ CrowdStrike LogScale), sharing state through a `mock_server_state` fixture.
 | File | Change |
 |---|---|
 | `tests/conftest.py` | Fixed `PROJECT_ROOT` (parents[3]→parents[1]); added `mock_server_state` fixture; CrowdStrike mock endpoints; QRadar handler ordering; `ThreadingHTTPServer`; non-destructive reset |
-| `tests/test_connector_integrations.py` | Rewritten to run all four connectors over the mock HTTP server with shared state |
-| `tests/test_connectors.py` | Uses `mock_server_state` fixture; `monkeypatch` for backoff sleeps |
-| `app/connector/tests/conftest.py` | Added project-root sys.path bootstrap; `mock_server_state` fixture; `ThreadingHTTPServer`; non-destructive reset |
-| `app/connector/tests/test_connectors.py` | Same fixture fixes as the root test copy |
-| `app/main.py` | Registered the rules router |
+| `tests/test_connector_integrations.py` | Connector integration tests now run against the mock SIEM HTTP server with shared state (Splunk/Elastic/QRadar/CrowdStrike) + Sentinel mock-mode test |
+| `tests/test_connectors.py` | Shared-state fixture; `monkeypatch` for backoff sleeps |
+| `app/connector/tests/conftest.py` | Project-root sys.path bootstrap; `mock_server_state` fixture; `ThreadingHTTPServer`; non-destructive reset |
+| `app/main.py` | Registered the rules router (rules API was returning route-not-found 404) |
 | `app/connector/config_validation.py` | Corrected CrowdStrike vendor key + required fields |
-| `app/connector/crowdstrike_logscale_connector.py` | Removed unreachable except branches; defensive job-id extraction |
-| `app/connector/splunk_connector.py` | Scheme-aware base URL; read-only blocklist; typed error propagation |
-| `app/connector/qradar_connector.py` | Typed error propagation instead of silent `[]` |
 | `app/connector/plugin_loader.py` | Logging instead of `print` |
-| `.github/workflows/ci.yml` (moved) | Repo-root CI with corrected paths |
+| `tests/test_crowdstrike_logscale_connector.py` | Updated 4 stale tests to the resilience contract (transient→fallback, permanent→raise) |
+| `tests/test_rule_search.py` | Search tests pass `paginated=true` (raw-list default is the route's design) |
+| `app/connector/tests/test_splunk_resilience.py` | Zeroed retry backoff like the other resilience test factories |
+| `.github/workflows/ci.yml` (moved) | Repo-root CI with corrected paths (was never executed) |
 | `rule ingestion/.dockerignore` | Added |
 | `rule ingestion/.gitignore` | Added `repositories/`, `.cloned_repos/` |
 | git index | Untracked committed `venv/` (2,591 files), `__pycache__/*.pyc`, `app/python`, broken `repositories/sigma` gitlink |

@@ -77,7 +77,12 @@ def setup_rules():
 def test_search_route_is_registered_and_returns_metadata():
     setup_rules()
 
-    response = client.get("/api/v2/rules/search")
+    # The endpoint returns a plain list by default; pass
+    # paginated=true to get the structured envelope.
+    response = client.get(
+        "/api/v2/rules/search",
+        params={"paginated": "true"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -91,7 +96,10 @@ def test_search_route_is_registered_and_returns_metadata():
 def test_search_keyword_matches_title_description_and_tags():
     setup_rules()
 
-    response = client.get("/api/v2/rules/search", params={"q": "powershell"})
+    response = client.get(
+        "/api/v2/rules/search",
+        params={"q": "powershell", "paginated": "true"},
+    )
 
     assert response.status_code == 200
     ids = {item["rule_id"] for item in response.json()["items"]}
@@ -108,6 +116,7 @@ def test_search_filters_by_status_severity_mitre_and_format():
             "severity": "critical",
             "mitre_technique": "t1059",
             "rule_format": "kql",
+            "paginated": "true",
         },
     )
 
@@ -126,6 +135,7 @@ def test_search_pagination_and_title_sorting():
             "page_size": 2,
             "sort_by": "title",
             "sort_order": "asc",
+            "paginated": "true",
         },
     )
 
