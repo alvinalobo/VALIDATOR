@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+
+# Runtime clone / repo cache dirs
+repositories/
+.cloned_repos/
+
+# Test / tooling artifacts
+.pytest_cache/
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore

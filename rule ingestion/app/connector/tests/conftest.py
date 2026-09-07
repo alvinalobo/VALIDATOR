@@ -1,9 +1,27 @@
+import sys
+from pathlib import Path
 import time
 import socket
 import threading
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
+
+# ============================================================
+# PROJECT ROOT / PYTHON PATH FIX
+# ============================================================
+# conftest.py location:
+# rule ingestion/
+# └── app/
+#     └── connector/
+#         └── tests/
+#             └── conftest.py
+#
+# parents[3] => rule ingestion/
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Global mock server state that tests can modify
 MOCK_SERVER_STATE = {
@@ -124,7 +142,10 @@ def get_free_port():
 @pytest.fixture(scope="session")
 def mock_server_url():
     port = get_free_port()
-    server = HTTPServer(("127.0.0.1", port), MockSIEMRequestHandler)
+    # Threaded so a slow/stalled connection can't block the next test's
+    # request — a single-threaded HTTPServer intermittently aborts
+    # connections on Windows under rapid successive requests.
+    server = ThreadingHTTPServer(("127.0.0.1", port), MockSIEMRequestHandler)
     server_thread = threading.Thread(target=server.serve_forever)
     server_thread.daemon = True
     server_thread.start()
@@ -132,11 +153,28 @@ def mock_server_url():
     server.shutdown()
     server.server_close()
 
+
+# ============================================================
+# SHARED MOCK STATE FIXTURE
+# ============================================================
+# The mock server handler and the tests must read/write the SAME
+# state dict. Importing `from tests.conftest import MOCK_SERVER_STATE`
+# from a test module can resolve to a *second* module object (pytest
+# loads conftest.py under a different module name), which silently
+# forks the state and makes counters/status mutations invisible to
+# the server. Always inject the dict through this fixture instead.
+
+@pytest.fixture
+def mock_server_state():
+    return MOCK_SERVER_STATE
+
 @pytest.fixture(autouse=True)
 def reset_mock_state():
     """Reset global mock state before each test."""
+    # Non-destructive reset: update every key in place instead of
+    # clear()+update(), so a request being served concurrently can
+    # never observe an empty (partially cleared) state dict.
     global MOCK_SERVER_STATE
-    MOCK_SERVER_STATE.clear()
     MOCK_SERVER_STATE.update({
         "splunk_dispatch_status_calls": 0,
         "splunk_dispatch_state": "DONE",

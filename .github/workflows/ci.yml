@@ -1,5 +1,9 @@
 name: Python CI
 
+# NOTE: GitHub Actions only reads workflows from the repository ROOT
+# (.github/workflows/), not from subdirectories — the previous copy
+# under `rule ingestion/.github/workflows/` never ran.
+
 on:
   push:
     branches:
@@ -25,12 +29,16 @@ jobs:
         python-version: "3.13"
 
     - name: Install Dependencies
+      working-directory: rule ingestion
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
     - name: Run Tests
+      working-directory: rule ingestion
       run: |
         pytest
+
     - name: Build Docker Image
-      run: docker build -t rule-ingestion .
+      working-directory: rule ingestion
+      run: docker build -f dockerfile -t rule-ingestion .

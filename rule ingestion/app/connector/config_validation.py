@@ -5,13 +5,16 @@ from urllib.parse import urlparse
 from app.connector.base_connector import ConnectorConfig
 
 # Credential fields each vendor's connector needs to function.
-# Add an entry here whenever a new connector is added to the framework.
+# The vendor keys must match the names the connectors register under
+# (see plugin_loader.py / each *_connector.py's ConnectorRegistry.register
+# call). Add an entry here whenever a new connector is added to the
+# framework.
 REQUIRED_CREDENTIAL_FIELDS: Dict[str, List[str]] = {
     "splunk": ["host", "token"],
     "sentinel": ["workspace_id", "token"],
     "elastic": ["base_url", "api_key"],
     "qradar": ["base_url", "sec_token"],
-    "crowdstrike": ["base_url", "client_id", "client_secret"],
+    "crowdstrike_logscale": ["host", "token"],
 }
 
 

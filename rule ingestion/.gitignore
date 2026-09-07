@@ -12,6 +12,10 @@ ENV/
 # Pytest
 .pytest_cache/
 
+# Runtime clone / repo cache dirs (rule ingestion clones rule repos here)
+repositories/
+.cloned_repos/
+
 # IDE
 .vscode/
 .idea/

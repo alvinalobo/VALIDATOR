@@ -1,8 +1,21 @@
 import importlib
 import inspect
+import logging
 import pkgutil
 
 from app.connector.base_connector import BaseConnector, ConnectorRegistry
+
+logger = logging.getLogger(__name__)
+
+# Modules that are part of the framework itself, not plugins.
+_NON_PLUGIN_MODULES = {
+    "base_connector",
+    "config_validation",
+    "exceptions",
+    "plugin_loader",
+    "retry",
+    "__pycache__",
+}
 
 
 def load_plugins():
@@ -15,12 +28,7 @@ def load_plugins():
     for _, module_name, _ in pkgutil.iter_modules(package.__path__):
 
         # Ignore non-plugin modules
-        if module_name in [
-            "base_connector",
-            "exceptions",
-            "plugin_loader",
-            "__pycache__"
-        ]:
+        if module_name in _NON_PLUGIN_MODULES:
             continue
 
         module = importlib.import_module(f"app.connector.{module_name}")
@@ -36,6 +44,10 @@ def load_plugins():
 
                 try:
                     ConnectorRegistry.register(vendor, obj)
-                    print(f"[PluginLoader] Registered: {vendor}")
-                except Exception as e:
-                    print(f"[PluginLoader] Failed to register {vendor}: {e}")
+                    logger.info("[PluginLoader] Registered: %s", vendor)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.error(
+                        "[PluginLoader] Failed to register %s: %s",
+                        vendor,
+                        exc,
+                    )

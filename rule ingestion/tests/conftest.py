@@ -4,7 +4,7 @@ import time
 import socket
 import threading
 import json
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -14,13 +14,11 @@ import pytest
 # ============================================================
 # conftest.py location:
 # rule ingestion/
-# └── app/
-#     └── connector/
-#         └── tests/
-#             └── conftest.py
+# └── tests/
+#     └── conftest.py
 #
-# parents[3] => rule ingestion/
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# parents[1] => rule ingestion/
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -119,6 +117,29 @@ class MockSIEMRequestHandler(BaseHTTPRequestHandler):
     # ========================================================
 
     def do_GET(self):
+
+        # ----------------------------------------------------
+        # CROWDSTRIKE LOGSCALE QUERY JOBS
+        # ----------------------------------------------------
+        if "/api/v1/repositories/" in self.path:
+
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/json"
+            )
+            self.end_headers()
+
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "id": "cs-query-job-123",
+                        "CommandLine": "msiexec.exe"
+                    }
+                ).encode("utf-8")
+            )
+
+            return
 
         # ----------------------------------------------------
         # SPLUNK AUTH VALIDATION
@@ -266,48 +287,11 @@ class MockSIEMRequestHandler(BaseHTTPRequestHandler):
             return
 
         # ----------------------------------------------------
-        # QRADAR CONNECTION VALIDATION
+        # QRADAR SEARCH STATUS / RESULTS
         # ----------------------------------------------------
-        if "/api/ariel/searches" in self.path:
-
-            status = MOCK_SERVER_STATE[
-                "qradar_health_status"
-            ]
-
-            self.send_response(status)
-
-            self.send_header(
-                "Content-Type",
-                "application/json"
-            )
-
-            self.end_headers()
-
-            if status == 200:
-
-                self.wfile.write(
-                    json.dumps(
-                        {
-                            "searches": []
-                        }
-                    ).encode("utf-8")
-                )
-
-            else:
-
-                self.wfile.write(
-                    json.dumps(
-                        {
-                            "error": "QRadar unavailable"
-                        }
-                    ).encode("utf-8")
-                )
-
-            return
-
-        # ----------------------------------------------------
-        # QRADAR SEARCH STATUS
-        # ----------------------------------------------------
+        # Must be checked BEFORE the generic validation branch below:
+        # both match the substring "/api/ariel/searches", and the
+        # status/results paths carry a trailing search id.
         if "/api/ariel/searches/" in self.path:
 
             # Results endpoint should be checked separately
@@ -363,6 +347,46 @@ class MockSIEMRequestHandler(BaseHTTPRequestHandler):
             return
 
         # ----------------------------------------------------
+        # QRADAR CONNECTION VALIDATION
+        # ----------------------------------------------------
+        if "/api/ariel/searches" in self.path:
+
+            status = MOCK_SERVER_STATE[
+                "qradar_health_status"
+            ]
+
+            self.send_response(status)
+
+            self.send_header(
+                "Content-Type",
+                "application/json"
+            )
+
+            self.end_headers()
+
+            if status == 200:
+
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "searches": []
+                        }
+                    ).encode("utf-8")
+                )
+
+            else:
+
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "error": "QRadar unavailable"
+                        }
+                    ).encode("utf-8")
+                )
+
+            return
+
+        # ----------------------------------------------------
         # NOT FOUND
         # ----------------------------------------------------
         self.send_response(404)
@@ -373,6 +397,29 @@ class MockSIEMRequestHandler(BaseHTTPRequestHandler):
     # ========================================================
 
     def do_POST(self):
+
+        # ----------------------------------------------------
+        # CROWDSTRIKE LOGSCALE QUERY JOBS
+        # ----------------------------------------------------
+        if "/api/v1/repositories/" in self.path:
+
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/json"
+            )
+            self.end_headers()
+
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "id": "cs-query-job-123",
+                        "CommandLine": "msiexec.exe"
+                    }
+                ).encode("utf-8")
+            )
+
+            return
 
         # ----------------------------------------------------
         # SPLUNK DISPATCH JOB
@@ -536,7 +583,10 @@ def mock_server_url():
 
     port = get_free_port()
 
-    server = HTTPServer(
+    # Threaded so a slow/stalled connection can't block the next test's
+    # request — a single-threaded HTTPServer intermittently aborts
+    # connections on Windows under rapid successive requests.
+    server = ThreadingHTTPServer(
         ("127.0.0.1", port),
         MockSIEMRequestHandler
     )
@@ -555,14 +605,30 @@ def mock_server_url():
 
 
 # ============================================================
+# SHARED MOCK STATE FIXTURE
+# ============================================================
+# The mock server handler and the tests must read/write the SAME
+# state dict. Importing `from tests.conftest import MOCK_SERVER_STATE`
+# from a test module can resolve to a *second* module object (pytest
+# loads conftest.py under a different module name), which silently
+# forks the state and makes counters/status mutations invisible to
+# the server. Always inject the dict through this fixture instead.
+
+@pytest.fixture
+def mock_server_state():
+    return MOCK_SERVER_STATE
+
+
+# ============================================================
 # RESET MOCK STATE BEFORE EVERY TEST
 # ============================================================
 
 @pytest.fixture(autouse=True)
 def reset_mock_state():
 
-    MOCK_SERVER_STATE.clear()
-
+    # Non-destructive reset: update every key in place instead of
+    # clear()+update(), so a request being served concurrently can
+    # never observe an empty (partially cleared) state dict.
     MOCK_SERVER_STATE.update({
 
         # ---------------- SPLUNK ----------------

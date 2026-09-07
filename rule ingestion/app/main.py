@@ -1,9 +1,8 @@
 
 from fastapi import FastAPI
 from app.api.connector_routes import router as connector_router
-from app.connector.plugin_loader import load_plugins
-
 from app.api.rules import router as rule_router
+from app.connector.plugin_loader import load_plugins
 
 app = FastAPI(
     title="Rule Ingestion Service",
