@@ -34,9 +34,7 @@ class SentinelConnector(BaseConnector):
 
         self.tenant_id = config.credentials.get("tenant_id", "")
         self.client_id = config.credentials.get("client_id", "")
-        self.client_secret = config.credentials.get("client_secret", "")
         self.workspace_id = config.credentials.get("workspace_id", "")
-        self.access_token = config.credentials.get("access_token", "")
         self.is_mock = config.credentials.get("mock", not bool(self.tenant_id))
         self.verify_ssl = config.credentials.get("verify_ssl", True)
         self.timeout = config.credentials.get("timeout", 30.0)
@@ -54,8 +52,10 @@ class SentinelConnector(BaseConnector):
             "Accept": "application/json",
         }
 
-        if self.access_token:
-            headers["Authorization"] = f"Bearer {self.access_token}"
+        access_token = self.get_credential("access_token")
+
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
 
         return headers
 

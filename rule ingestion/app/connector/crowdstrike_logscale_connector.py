@@ -36,7 +36,6 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
             "",
         ).rstrip("/")
 
-        self.token = config.credentials.get("token")
 
         self.repository = config.scope.get(
             "repository",
@@ -46,13 +45,15 @@ class CrowdStrikeLogScaleConnector(BaseConnector):
         self._last_job_id = None
 
     def _get_auth_headers(self) -> Dict[str, str]:
-        if not self.token:
+        token = self.get_credential("token")
+
+        if not token:
             raise ValueError(
                 "CrowdStrike LogScale API token is required"
             )
 
         return {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
 

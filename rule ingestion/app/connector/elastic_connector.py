@@ -80,14 +80,14 @@ class ElasticConnector(BaseConnector):
 
         self._session = requests.Session()
 
-        self._session.headers.update(
-            {
-                "Authorization": (
-                    f"ApiKey {config.credentials['api_key']}"
-                ),
-                "Content-Type": "application/json",
-            }
-        )
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Build authentication headers when a request needs them."""
+        api_key = self.get_credential("api_key")
+
+        return {
+            "Authorization": f"ApiKey {api_key}",
+            "Content-Type": "application/json",
+        }
 
     def _query_fallback(
         self,
@@ -154,6 +154,7 @@ class ElasticConnector(BaseConnector):
             resp = self._session.post(
                 f"{self._base_url}/{self._index}/_eql/search",
                 json=body,
+                headers=self._get_auth_headers(),
                 timeout=30,
             )
 
@@ -211,6 +212,7 @@ class ElasticConnector(BaseConnector):
             resp = self._session.post(
                 f"{self._base_url}/{self._index}/_search",
                 json=body,
+                headers=self._get_auth_headers(),
                 timeout=30,
             )
 
@@ -305,6 +307,7 @@ class ElasticConnector(BaseConnector):
         try:
             resp = self._session.get(
                 f"{self._base_url}/_cluster/health",
+                headers=self._get_auth_headers(),
                 timeout=5,
             )
 

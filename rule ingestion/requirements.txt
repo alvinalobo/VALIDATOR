@@ -9,3 +9,5 @@ httpx
 pyyaml
 python-dotenv
 requests
+
+cryptography>=46.0.0

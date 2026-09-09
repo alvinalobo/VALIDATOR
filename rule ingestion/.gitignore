@@ -24,3 +24,9 @@ repositories/
 .DS_Store
 Thumbs.db
 .venv/
+
+# Connector encryption / local secrets
+.env
+.env.*
+*.key
+*.pem

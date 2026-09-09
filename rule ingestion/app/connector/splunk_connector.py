@@ -34,9 +34,7 @@ class SplunkConnector(BaseConnector):
 
         self.host = self.config.credentials.get("host", "").rstrip("/")
         self.port = self.config.credentials.get("port", 8089)
-        self.token = self.config.credentials.get("token")
         self.username = self.config.credentials.get("username")
-        self.password = self.config.credentials.get("password")
 
         self.is_mock = self.config.credentials.get(
             "mock",
@@ -56,15 +54,18 @@ class SplunkConnector(BaseConnector):
 
     def _get_auth_headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}
+        token = self.get_credential("token")
 
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
         return headers
 
     def _get_auth_tuple(self) -> Optional[tuple]:
-        if not self.token and self.username and self.password:
-            return self.username, self.password
+        password = self.get_credential("password")
+
+        if not self.get_credential("token") and self.username and password:
+            return self.username, password
 
         return None
 

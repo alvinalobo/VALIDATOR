@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
+import os
 from typing import List, Dict, Any, Optional, Type, Callable, TypeVar
 
 from pydantic import BaseModel, Field
 
 from app.connector.resilience import ConnectorResilience
+from app.connector.credential_manager import CredentialManager
 T = TypeVar("T")
 
 
@@ -28,6 +30,11 @@ class BaseConnector(ABC):
     def __init__(self, config: ConnectorConfig):
         self.config = config
         self._last_poll_ts: Optional[float] = None
+        self.credential_manager = (
+            CredentialManager()
+            if CredentialManager.ENV_KEY_NAME in os.environ
+            else None
+        )
 
         # Centralized resilience layer.
         # Each connector instance gets its own circuit breaker.
@@ -51,6 +58,18 @@ class BaseConnector(ABC):
     def validate_connection(self) -> bool:
         """Verify credentials work. READ-ONLY."""
         pass
+
+    def get_credential(self, name: str) -> Optional[str]:
+        """Return a connector credential, decrypting it when required."""
+        value = self.config.credentials.get(name)
+
+        if value is None:
+            return None
+
+        if self.credential_manager is not None:
+            return self.credential_manager.decrypt(value)
+
+        return str(value)
 
     def execute_with_resilience(
         self,

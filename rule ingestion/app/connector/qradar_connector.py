@@ -41,9 +41,6 @@ class QRadarConnector(BaseConnector):
             "",
         ).rstrip("/")
 
-        self.sec_token = self.config.credentials.get(
-            "sec_token"
-        )
 
         self.is_mock = self.config.credentials.get(
             "mock",
@@ -78,8 +75,10 @@ class QRadarConnector(BaseConnector):
             "Content-Type": "application/json",
         }
 
-        if self.sec_token:
-            headers["SEC"] = self.sec_token
+        sec_token = self.get_credential("sec_token")
+
+        if sec_token:
+            headers["SEC"] = sec_token
 
         return headers
 
