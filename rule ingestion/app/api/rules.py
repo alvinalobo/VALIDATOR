@@ -6,31 +6,26 @@ import os
 import hashlib
 import shutil
 import git
-
 from pydantic import BaseModel
 from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum, PaginatedRuleResponse
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
-
 router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
-
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
-
 class RuleSearchResponse(BaseModel):
     items: List[ParsedRule]
     total: int
     page: int
     page_size: int
     total_pages: int
-
-def clone_repo(repo_url: str, branch: str = 'main') -> str:
+def clone_repo(repo_url: str, branch: str = 'main', depth: Optional[int] = 1) -> str:
     # If repo_url is a local path, use it directly
     if os.path.exists(repo_url) and os.path.isdir(repo_url):
         return os.path.abspath(repo_url)
         
     # Generate unique directory name
-    h = hashlib.sha256(repo_url.encode('utf-8')).hexdigest()[:12]
+    h = hashlib.sha256(f"{repo_url}#{branch}".encode('utf-8')).hexdigest()[:12]
     workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".cloned_repos"))
     os.makedirs(workspace_dir, exist_ok=True)
     repo_path = os.path.join(workspace_dir, f"{h}_{branch}")
@@ -38,16 +33,22 @@ def clone_repo(repo_url: str, branch: str = 'main') -> str:
     if os.path.exists(repo_path):
         try:
             repo = git.Repo(repo_path)
-            repo.remotes.origin.fetch()
+            if depth:
+                repo.remotes.origin.fetch(depth=depth)
+            else:
+                repo.remotes.origin.fetch()
             repo.git.checkout(branch)
             repo.git.reset('--hard', f'origin/{branch}')
             return repo_path
         except Exception:
             shutil.rmtree(repo_path, ignore_errors=True)
             
-    git.Repo.clone_from(repo_url, repo_path, branch=branch)
+    clone_kwargs = {"branch": branch}
+    if depth:
+        clone_kwargs["depth"] = depth
+        clone_kwargs["single_branch"] = True
+    git.Repo.clone_from(repo_url, repo_path, **clone_kwargs)
     return repo_path
-
 def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
     discovered = []
     for root, dirs, files in os.walk(repo_path):
@@ -63,7 +64,6 @@ def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
                 if file_lower.endswith('.kql'):
                     discovered.append(os.path.join(root, file))
     return sorted(discovered)
-
 @router.post("/ingest", response_model=List[ParsedRule])
 async def ingest_rules(req: RuleIngestRequest):
     try:
@@ -134,11 +134,9 @@ async def ingest_rules(req: RuleIngestRequest):
             rules.append(parsed)
             
     return rules
-
 # ============================================================
 # RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
 # ============================================================
-
 @router.get("/search", response_model=Union[RuleSearchResponse, PaginatedRuleResponse, List[ParsedRule]])
 async def search_rules(
     response: Response = None,
@@ -157,7 +155,6 @@ async def search_rules(
     Search and filter rules with pagination and sorting.
     """
     results = list(INGESTED_RULES.values())
-
     # --- Filter by search term ---
     if q:
         q_lower = q.lower()
@@ -167,7 +164,6 @@ async def search_rules(
             or q_lower in (r.description or "").lower()
             or any(q_lower in tag.lower() for tag in r.tags)
         ]
-
     # --- Filter by status ---
     if status:
         status_value = status.lower()
@@ -180,14 +176,12 @@ async def search_rules(
                 status_code=400,
                 detail="status must be one of: active, deprecated",
             )
-
     # --- Filter by severity ---
     if severity:
         results = [
             r for r in results
             if r.severity and r.severity.lower() == severity.lower()
         ]
-
     # --- Filter by MITRE technique ---
     if mitre_technique:
         tech = mitre_technique.upper()
@@ -195,7 +189,6 @@ async def search_rules(
             r for r in results
             if tech in r.mitre_techniques
         ]
-
     # --- Filter by rule format ---
     if rule_format:
         format_value = rule_format.lower()
@@ -209,7 +202,6 @@ async def search_rules(
             r for r in results
             if r.rule_format and r.rule_format.value == format_value
         ]
-
     # --- Sorting ---
     sort_fields = {
         "created_at": lambda r: r.created_at,
@@ -231,17 +223,14 @@ async def search_rules(
     sort_fn = sort_fields[sort_by_value]
     reverse = sort_order_value == "desc"
     results.sort(key=sort_fn, reverse=reverse)
-
     # --- Pagination ---
     total = len(results)
     total_pages = ceil(total / page_size) if total else 0
     start = (page - 1) * page_size
     end = start + page_size
     paginated_items = results[start:end]
-
     has_next = page < total_pages
     has_prev = page > 1 and total_pages > 0
-
     if response:
         response.headers["X-Total-Count"] = str(total)
         response.headers["X-Page"] = str(page)
@@ -249,7 +238,6 @@ async def search_rules(
         response.headers["X-Total-Pages"] = str(total_pages)
         response.headers["X-Has-Next"] = "true" if has_next else "false"
         response.headers["X-Has-Prev"] = "true" if has_prev else "false"
-
     if paginated:
         return PaginatedRuleResponse(
             items=paginated_items,
@@ -260,15 +248,12 @@ async def search_rules(
             has_next=has_next,
             has_prev=has_prev
         )
-
     return paginated_items
-
 @router.get("/{rule_id}", response_model=ParsedRule)
 async def get_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
     return INGESTED_RULES[rule_id]
-
 @router.post("/{rule_id}/deprecate")
 async def deprecate_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
@@ -280,7 +265,6 @@ async def deprecate_rule(rule_id: str):
         "rule_id": rule_id,
         "is_active": False
     }
-
 @router.get("/{rule_id}/dependencies")
 async def get_rule_dependencies(rule_id: str):
     if rule_id not in INGESTED_RULES:
