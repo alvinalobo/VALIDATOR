@@ -1,0 +1,19 @@
+title: Possible DNS Tunnelling Exfiltration
+id: 88888888-8888-8888-8888-888888888888
+status: stable
+description: Detects unusually long DNS query names consistent with data exfiltration over DNS.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.exfiltration
+    - attack.t1048.003
+logsource:
+    category: dns_query
+    product: windows
+detection:
+    selection:
+        QueryName|re: '^[a-zA-Z0-9]{50,}\.'
+    condition: selection
+falsepositives:
+    - Content delivery networks with long hostnames
+level: high

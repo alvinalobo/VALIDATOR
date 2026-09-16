@@ -1,0 +1,19 @@
+title: Deprecated Example Detection Rule
+id: aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+status: deprecated
+description: A rule marked deprecated; used to verify the deprecation workflow sets is_active to false.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.discovery
+    - attack.t1082
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\systeminfo.exe'
+    condition: selection
+falsepositives:
+    - Inventory tooling
+level: low

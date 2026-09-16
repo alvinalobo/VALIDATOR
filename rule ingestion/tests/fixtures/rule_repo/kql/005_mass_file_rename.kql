@@ -1,0 +1,12 @@
+// id: b5555555-5555-5555-5555-555555555555
+// title: Mass File Rename Consistent with Ransomware
+// description: Detects a high volume of file rename operations within a short window.
+// author: Pod Alpha
+// mitre: T1486
+// level: critical
+
+DeviceFileEvents
+| where ActionType == "FileRenamed"
+| summarize RenameCount = count() by DeviceName, InitiatingProcessFileName, bin(Timestamp, 5m)
+| where RenameCount > 500
+| project Timestamp, DeviceName, InitiatingProcessFileName, RenameCount

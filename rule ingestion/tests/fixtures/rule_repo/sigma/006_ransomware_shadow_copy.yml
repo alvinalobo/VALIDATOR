@@ -1,0 +1,22 @@
+title: Shadow Copy Deletion Indicative of Ransomware
+id: 66666666-6666-6666-6666-666666666666
+status: stable
+description: Detects deletion of volume shadow copies, frequently performed before ransomware encryption.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.impact
+    - attack.t1490
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\vssadmin.exe'
+        CommandLine|contains|all:
+            - 'delete'
+            - 'shadows'
+    condition: selection
+falsepositives:
+    - Backup software cleanup
+level: critical

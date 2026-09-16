@@ -1,0 +1,21 @@
+title: Suspicious Windows Service Installation
+id: 77777777-7777-7777-7777-777777777777
+status: stable
+description: Detects installation of a new Windows service from a user-writable directory.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.persistence
+    - attack.privilege_escalation
+    - attack.t1543.003
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection:
+        Image|endswith: '\sc.exe'
+        CommandLine|contains: 'create'
+    condition: selection
+falsepositives:
+    - Legitimate software installation
+level: high

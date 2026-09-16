@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
-from typing import List, Dict, Any, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import List, Dict, Any, Optional, Union
 from enum import Enum
 from datetime import datetime
+import os
+from urllib.parse import urlparse
 
 class RuleFormatEnum(str, Enum):
     SIGMA = "sigma"
@@ -23,9 +25,14 @@ class RuleIngestRequest(BaseModel):
         include_validation: Whether to validate rules during ingestion
         tags: Optional tags to apply to all ingested rules
     """
-    repo_url: HttpUrl = Field(
-        ..., 
-        description="Git repository URL (must be valid HTTP/HTTPS URL)"
+    repo_url: str = Field(
+        ...,
+        min_length=1,
+        max_length=2048,
+        description=(
+            "Git repository URL (http/https) or an existing local directory path. "
+            "Local paths are used by the integration tests and air-gapped ingestion."
+        )
     )
     branch: str = Field(
         default="main",
@@ -50,14 +57,28 @@ class RuleIngestRequest(BaseModel):
     @field_validator("repo_url")
     @classmethod
     def validate_repo_url(cls, v):
-        """Ensure repository URL is a Git repository"""
-        url_str = str(v)
-        if not url_str.endswith(".git") and not any(
-            host in url_str for host in ["github.com", "gitlab.com", "bitbucket.org"]
-        ):
-            # Allow non-.git URLs from known Git hosting providers
-            pass
-        return v
+        """
+        Accept either an http(s) Git URL or an existing local directory.
+
+        Local directories are a first-class case: `clone_repo()` already
+        short-circuits on them, which is what lets the integration suite ingest
+        a fixture repository without any network access.
+        """
+        value = str(v).strip()
+        if not value:
+            raise ValueError("repo_url cannot be empty")
+
+        # An existing directory is used in place (no cloning).
+        if os.path.isdir(value):
+            return value
+
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                "repo_url must be an http(s) repository URL or an existing "
+                f"local directory path. Got: {value!r}"
+            )
+        return value
 
     @field_validator("tags")
     @classmethod
@@ -133,9 +154,12 @@ class ParsedRule(BaseModel):
         default_factory=list,
         description="MITRE ATT&CK technique IDs (e.g., T1234, T1234.001)"
     )
-    detection_logic: Dict[str, Any] = Field(
+    detection_logic: Union[Dict[str, Any], str] = Field(
         default_factory=dict,
-        description="Normalized detection logic (parsed rule content)"
+        description=(
+            "Normalized detection logic. A structured mapping for Sigma rules "
+            "and the raw query string for KQL rules."
+        )
     )
     syntax_valid: bool = Field(
         ...,

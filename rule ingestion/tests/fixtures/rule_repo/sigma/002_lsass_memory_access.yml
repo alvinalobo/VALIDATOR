@@ -1,0 +1,22 @@
+title: Credential Dumping via LSASS Memory Access
+id: 22222222-2222-2222-2222-222222222222
+status: stable
+description: Detects processes attempting to read LSASS memory, indicative of credential dumping.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.credential_access
+    - attack.t1003.001
+logsource:
+    category: process_access
+    product: windows
+detection:
+    selection:
+        TargetImage|endswith: '\lsass.exe'
+        GrantedAccess|contains:
+            - '0x1010'
+            - '0x1410'
+    condition: selection
+falsepositives:
+    - Endpoint protection agents
+level: critical

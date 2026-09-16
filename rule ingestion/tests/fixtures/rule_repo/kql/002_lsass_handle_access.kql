@@ -1,0 +1,12 @@
+// id: b2222222-2222-2222-2222-222222222222
+// title: LSASS Handle Access by Non-System Process
+// description: Detects a non-system process opening a handle to lsass.exe.
+// author: Pod Alpha
+// mitre: T1003.001
+// level: critical
+
+DeviceEvents
+| where ActionType == "OpenProcessApiCall"
+| where FileName =~ "lsass.exe"
+| where InitiatingProcessFileName !in~ ("MsMpEng.exe", "svchost.exe")
+| project Timestamp, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine

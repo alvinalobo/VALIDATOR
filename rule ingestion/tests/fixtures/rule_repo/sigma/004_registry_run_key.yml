@@ -1,0 +1,21 @@
+title: Persistence via Registry Run Key Modification
+id: 44444444-4444-4444-4444-444444444444
+status: stable
+description: Detects modification of a Run key used to establish persistence at logon.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.persistence
+    - attack.t1547.001
+logsource:
+    category: registry_set
+    product: windows
+detection:
+    selection:
+        TargetObject|contains:
+            - '\CurrentVersion\Run\'
+            - '\CurrentVersion\RunOnce\'
+    condition: selection
+falsepositives:
+    - Legitimate installers registering startup entries
+level: medium

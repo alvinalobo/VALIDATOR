@@ -1,0 +1,11 @@
+// id: b1111111-1111-1111-1111-111111111111
+// title: Suspicious PowerShell Download Cradle
+// description: Detects PowerShell downloading a remote payload via a cradle.
+// author: Pod Alpha
+// mitre: T1059.001, T1105
+// level: high
+
+DeviceProcessEvents
+| where FileName =~ "powershell.exe"
+| where ProcessCommandLine has_any ("DownloadString", "DownloadFile", "IEX")
+| project Timestamp, DeviceName, AccountName, ProcessCommandLine

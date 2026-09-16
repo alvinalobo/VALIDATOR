@@ -1,0 +1,12 @@
+// id: b3333333-3333-3333-3333-333333333333
+// title: Scheduled Task Created from User-Writable Path
+// description: Detects schtasks.exe creating a task whose action lives in a temp or user profile directory.
+// author: Pod Alpha
+// mitre: T1053.005
+// level: medium
+
+DeviceProcessEvents
+| where FileName =~ "schtasks.exe"
+| where ProcessCommandLine has "/create"
+| where ProcessCommandLine has_any ("\\AppData\\", "\\Temp\\", "\\Users\\Public\\")
+| project Timestamp, DeviceName, AccountName, ProcessCommandLine

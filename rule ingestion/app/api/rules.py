@@ -6,11 +6,74 @@ import os
 import hashlib
 import shutil
 import git
-from pydantic import BaseModel
+from copy import deepcopy
+from pydantic import BaseModel, Field
+from typing import Any
 from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum, PaginatedRuleResponse
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
+from app.services.rule_versioning import rule_versioning_service, RuleVersioningError
+from app.services.rule_dependency_tracker import (
+    RuleDependencyTracker,
+    RuleHasDependentsError,
+)
+from dataclasses import asdict
 router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
+# Tracks which validation runs / re-validation runs / actions used which rule
+# version, so a rule can be retired without silently stranding a verdict's
+# audit trail (W7).
+dependency_tracker = RuleDependencyTracker()
+
+# Content-addressed parse cache (W13). A large rule repository (1000+ rules)
+# routinely contains the same content in several places — vendor packs, forks,
+# copied directories. Parsing dominates ingest cost (~10 ms/rule with pySigma),
+# so identical bytes are parsed once and the stored result is returned as a copy.
+_PARSE_CACHE: Dict[str, Any] = {}
+_PARSE_CACHE_MAX_ENTRIES = 5000
+
+
+def _parse_rule_content(raw: str, file_path: str):
+    """
+    Parse one rule file's contents, memoised on (content hash, extension).
+
+    Returns (parsed_dict, rule_format, error_msg).
+
+    Identical bytes always parse to an identical result, so the cache is exact
+    rather than heuristic. Results are deep-copied on the way in and out so
+    that two rules sharing the same source content never alias the same
+    mutable dicts.
+    """
+    suffix = os.path.splitext(file_path)[1].lower()
+    content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    cache_key = (content_hash, suffix)
+
+    cached = _PARSE_CACHE.get(cache_key)
+    if cached is not None:
+        return deepcopy(cached[0]), cached[1], cached[2]
+
+    parsed_dict = None
+    rule_format = None
+    error_msg = None
+    try:
+        if suffix in (".yml", ".yaml"):
+            parsed_dict = parse_sigma_rule(raw)
+            rule_format = RuleFormatEnum.SIGMA
+        elif suffix == ".kql":
+            parsed_dict = parse_kql_rule(raw)
+            rule_format = RuleFormatEnum.KQL
+        else:
+            rule_format = RuleFormatEnum.SIGMA
+    except Exception as e:
+        error_msg = str(e)
+        rule_format = (
+            RuleFormatEnum.SIGMA if suffix in (".yml", ".yaml") else RuleFormatEnum.KQL
+        )
+
+    if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX_ENTRIES:
+        _PARSE_CACHE.clear()
+    _PARSE_CACHE[cache_key] = (deepcopy(parsed_dict), rule_format, error_msg)
+
+    return parsed_dict, rule_format, error_msg
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
 class RuleSearchResponse(BaseModel):
@@ -19,6 +82,28 @@ class RuleSearchResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class RuleDependencyRequest(BaseModel):
+    """Recorded by the Validation Engine (Pod Beta) whenever a rule version
+    is actually executed against evidence."""
+
+    dependent_type: str = Field(
+        ...,
+        description="Dependent kind: 'validation_run', 'revalidation_run' or 'action'",
+    )
+    dependent_id: str = Field(..., description="Identifier of the dependent")
+    metadata: Optional[Dict[str, str]] = Field(
+        default=None, description="Optional extra context for the dependency record"
+    )
+
+
+class RuleDependencyResponse(BaseModel):
+    rule_id: str
+    dependent_count: int
+    safe_to_delete: bool
+    report: str
+    dependencies: List[Dict[str, Any]] = Field(default_factory=list)
 def clone_repo(repo_url: str, branch: str = 'main', depth: Optional[int] = 1) -> str:
     # If repo_url is a local path, use it directly
     if os.path.exists(repo_url) and os.path.isdir(repo_url):
@@ -84,19 +169,7 @@ async def ingest_rules(req: RuleIngestRequest):
             
         h = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         
-        parsed_dict = None
-        rule_format = None
-        error_msg = None
-        try:
-            if f.endswith('.yml') or f.endswith('.yaml'):
-                parsed_dict = parse_sigma_rule(raw)
-                rule_format = RuleFormatEnum.SIGMA
-            elif f.endswith('.kql'):
-                parsed_dict = parse_kql_rule(raw)
-                rule_format = RuleFormatEnum.KQL
-        except Exception as e:
-            error_msg = str(e)
-            rule_format = RuleFormatEnum.SIGMA if (f.endswith('.yml') or f.endswith('.yaml')) else RuleFormatEnum.KQL
+        parsed_dict, rule_format, error_msg = _parse_rule_content(raw, f)
             
         if parsed_dict:
             raw_data = parsed_dict.get("raw", {})
@@ -121,6 +194,15 @@ async def ingest_rules(req: RuleIngestRequest):
             rules.append(parsed)
             # Store in database
             INGESTED_RULES[parsed.rule_id] = parsed
+            # Record the full version history, addressed by content hash, so a
+            # verdict produced by an older revision stays reproducible after the
+            # rule is edited (W7). Re-ingesting identical content is a no-op.
+            rule_versioning_service.record_version(
+                rule_id=parsed.rule_id,
+                content_hash=parsed.content_hash,
+                title=parsed.title,
+                rule_format=parsed.rule_format.value,
+            )
         elif error_msg:
             parsed = ParsedRule(
                 rule_id="UNKNOWN",
@@ -260,27 +342,147 @@ async def deprecate_rule(rule_id: str):
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
     rule = INGESTED_RULES[rule_id]
     rule.is_active = False
+
+    # Retire the rule without breaking reproducibility: the versioning service
+    # keeps every historical content hash addressable, and existing dependents
+    # are reported rather than blocked (deprecation must not break the verdicts
+    # that already reference this rule) — W7.
+    try:
+        rule_versioning_service.record_version(
+            rule_id=rule_id,
+            content_hash=rule.content_hash,
+            title=rule.title,
+            rule_format=rule.rule_format.value,
+        )
+        rule_versioning_service.deprecate(rule_id)
+    except RuleVersioningError:
+        # Rule predates version tracking (e.g. seeded directly into
+        # INGESTED_RULES); deprecation still succeeds in the legacy store.
+        pass
+
+    dependents = dependency_tracker.get_dependents(rule_id)
     return {
         "message": f"Rule '{rule_id}' was successfully deprecated.",
         "rule_id": rule_id,
-        "is_active": False
+        "is_active": False,
+        "dependent_count": len(dependents),
+        "warning": (
+            f"{len(dependents)} dependent validation run(s) still reference "
+            "this rule; historical verdicts remain reproducible via the "
+            "content-addressed version store."
+            if dependents
+            else None
+        ),
     }
 @router.get("/{rule_id}/dependencies")
 async def get_rule_dependencies(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
     
-    # Mocking rule dependencies (historical validation runs that used this rule)
-    if rule_id == "b2345678-9abc-def0-1234-56789abcdef0":
-        return {
-            "rule_id": rule_id,
-            "dependencies": [
-                {"run_id": "run-001", "action_id": "act-501", "status": "active"},
-                {"run_id": "run-002", "action_id": "act-502", "status": "completed"}
-            ]
-        }
-    
+    dependents = dependency_tracker.get_dependents(rule_id)
     return {
         "rule_id": rule_id,
-        "dependencies": []
+        "dependent_count": len(dependents),
+        "safe_to_delete": not dependents,
+        "report": dependency_tracker.dependency_report(rule_id),
+        "dependencies": [asdict(dep) for dep in dependents],
+    }
+
+
+@router.post("/{rule_id}/dependencies", status_code=201)
+async def record_rule_dependency(rule_id: str, request: RuleDependencyRequest):
+    """
+    Record that a rule version was used by a validation run / re-validation run
+    / action (W7). The Validation Engine calls this when it executes a rule, so
+    the dependency graph reflects real usage rather than ingestion alone.
+    """
+    if request.dependent_type not in {
+        "validation_run",
+        "revalidation_run",
+        "action",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "dependent_type must be one of: validation_run, "
+                "revalidation_run, action"
+            ),
+        )
+
+    dependency_tracker.record_usage(
+        rule_id=rule_id,
+        dependent_type=request.dependent_type,
+        dependent_id=request.dependent_id,
+        metadata=request.metadata,
+    )
+
+    return {
+        "rule_id": rule_id,
+        "dependent_type": request.dependent_type,
+        "dependent_id": request.dependent_id,
+        "dependent_count": len(dependency_tracker.get_dependents(rule_id)),
+    }
+
+
+@router.get("/{rule_id}/impact")
+async def rule_retirement_impact(rule_id: str):
+    """
+    Answers "is it safe to delete/edit this rule?" before a detection engineer
+    does it, returning the full dependent list rather than a bare boolean (W7).
+    """
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    dependents = dependency_tracker.get_dependents(rule_id)
+    return {
+        "rule_id": rule_id,
+        "safe_to_delete": not dependents,
+        "safe_to_edit": not dependents,
+        "dependent_count": len(dependents),
+        "report": dependency_tracker.dependency_report(rule_id),
+        "dependencies": [asdict(dep) for dep in dependents],
+    }
+
+
+@router.get("/{rule_id}/versions")
+async def get_rule_versions(rule_id: str):
+    """
+    Full content-addressed version history for a rule (W7): every revision that
+    has ever existed, which one is current, and the current status. Superseded
+    revisions stay addressable so past verdicts remain explainable.
+    """
+    summary = rule_versioning_service.history_summary(rule_id)
+    if summary["version_count"] == 0 and rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    return summary
+
+
+@router.get("/{rule_id}/versions/{version}")
+async def get_rule_version(rule_id: str, version: int):
+    """Resolve one specific historical version of a rule."""
+    record = rule_versioning_service.get_version_number(rule_id, version)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Rule '{rule_id}' has no version {version}",
+        )
+    return asdict(record)
+
+
+@router.post("/{rule_id}/restore")
+async def restore_rule(rule_id: str):
+    """Reinstate a deprecated rule without discarding its version history (W7)."""
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    INGESTED_RULES[rule_id].is_active = True
+    try:
+        rule_versioning_service.restore(rule_id)
+    except RuleVersioningError:
+        pass
+
+    return {
+        "message": f"Rule '{rule_id}' was successfully restored.",
+        "rule_id": rule_id,
+        "is_active": True,
     }

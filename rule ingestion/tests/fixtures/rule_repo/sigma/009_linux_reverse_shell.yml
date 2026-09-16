@@ -1,0 +1,22 @@
+title: Linux Reverse Shell via Bash
+id: 99999999-9999-9999-9999-999999999999
+status: stable
+description: Detects common bash reverse shell one-liners on Linux hosts.
+author: Pod Alpha
+date: 2026/09/16
+tags:
+    - attack.execution
+    - attack.t1059.004
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        Image|endswith: '/bash'
+        CommandLine|contains:
+            - '/dev/tcp/'
+            - 'bash -i'
+    condition: selection
+falsepositives:
+    - Developer tooling
+level: high

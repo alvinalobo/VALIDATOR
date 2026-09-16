@@ -1,0 +1,12 @@
+// id: b4444444-4444-4444-4444-444444444444
+// title: Lateral Movement via Remote Service Creation
+// description: Detects remote service creation over SMB administrative shares.
+// author: Pod Alpha
+// mitre: T1021.002, T1543.003
+// level: high
+
+DeviceProcessEvents
+| where FileName =~ "sc.exe"
+| where ProcessCommandLine has "\\\\"
+| where ProcessCommandLine has_any ("create", "config")
+| project Timestamp, DeviceName, AccountName, ProcessCommandLine

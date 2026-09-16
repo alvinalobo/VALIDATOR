@@ -10,5 +10,8 @@ pyyaml
 python-dotenv
 requests
 GitPython
+# Sigma rule parsing/validation (Week 3). The parser falls back to a lenient
+# YAML path if this is missing, but pySigma is the primary parser.
+pySigma
 
 cryptography>=46.0.0
