@@ -41,4 +41,4 @@ jobs:
 
     - name: Build Docker Image
       working-directory: rule ingestion
-      run: docker build -f dockerfile -t rule-ingestion .
+      run: docker build -f Dockerfile -t rule-ingestion .

@@ -9,5 +9,6 @@ httpx
 pyyaml
 python-dotenv
 requests
+GitPython
 
 cryptography>=46.0.0
