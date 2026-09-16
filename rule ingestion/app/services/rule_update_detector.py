@@ -11,7 +11,7 @@ import logging
 import time
 import threading
 from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 import git
 
@@ -87,7 +87,7 @@ class RuleUpdateDetector:
             "repo_url": repo_url,
             "branch": branch,
             "local_path": local_path,
-            "registered_at": datetime.utcnow(),
+            "registered_at": datetime.now(timezone.utc),
         }
 
         # Record current commit as baseline
@@ -161,7 +161,7 @@ class RuleUpdateDetector:
                 branch=branch,
                 commit_hash=current_commit,
                 changed_files=changed_files,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
 
             logger.info(
@@ -290,7 +290,7 @@ class RuleChangeNotifier:
             "rule_id": rule_id,
             "event": event.to_dict(),
             "reason": reason,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "requires_rerun": True,
         }
 

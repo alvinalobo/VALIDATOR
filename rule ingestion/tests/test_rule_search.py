@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +21,7 @@ def make_rule(
     rule_format=RuleFormatEnum.SIGMA,
     created_at=None,
 ):
-    created_at = created_at or datetime.utcnow()
+    created_at = created_at or datetime.now(timezone.utc)
     return ParsedRule(
         rule_id=rule_id,
         title=title,
@@ -41,7 +41,7 @@ def make_rule(
 
 def setup_rules():
     INGESTED_RULES.clear()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     rules = [
         make_rule(
             "search-001",

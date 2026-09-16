@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Any, Optional, Union
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from urllib.parse import urlparse
 
@@ -42,7 +42,7 @@ class RuleIngestRequest(BaseModel):
     )
     rule_types: List[RuleFormatEnum] = Field(
         default=[RuleFormatEnum.SIGMA, RuleFormatEnum.KQL],
-        min_items=1,
+        min_length=1,
         description="Rule formats to ingest"
     )
     include_validation: bool = Field(
@@ -178,11 +178,11 @@ class ParsedRule(BaseModel):
         description="Categorization tags for rule discovery"
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when rule was created"
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp of last rule modification"
     )
     is_active: bool = Field(
@@ -260,7 +260,7 @@ class SyntaxValidationReport(BaseModel):
         description="Non-critical validation warnings"
     )
     validated_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="When validation was performed"
     )
 
@@ -307,7 +307,7 @@ class RuleIngestResponse(BaseModel):
         description="Detailed error messages"
     )
     completed_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="When ingestion completed"
     )
 
@@ -330,7 +330,7 @@ class BulkValidationResponse(BaseModel):
         description="Detailed validation results"
     )
     completed_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="When validation completed"
     )
 
