@@ -16,7 +16,7 @@ def test_clone_repo_local_directory(tmp_path):
 def test_clone_repo_shallow_new_clone(mock_git_repo, tmp_path):
     """Test that clone_from is invoked with depth=1 and single_branch=True."""
     mock_git_repo.clone_from = MagicMock()
-    with path("os.path.exists", side_effect=lambda p: False):
+    with patch("os.path.exists", side_effect=lambda p: False):
         res = clone_repo("https://github.com/example/rules.git", branch="main", depth=1)
     mock_git_repo.clone_from.assert_called_once()
     kwargs = mock_git_repo.clone_from.call_args[1]

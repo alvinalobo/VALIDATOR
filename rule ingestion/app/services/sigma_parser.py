@@ -38,9 +38,14 @@ def parse_sigma_rule(content: str) -> Dict[str, Any]:
     attempt validation later (title, detection).
     """
     try:
-    from yaml import CSafeLoader as SafeLoader
-except ImportError:
-    from yaml import SafeLoader  # Fallback to pure Python loader if C-bindings unavailable
+        from yaml import CSafeLoader as SafeLoader
+    except ImportError:
+        from yaml import SafeLoader  # Fallback to pure Python loader if C-bindings unavailable
+
+    try:
+        data = yaml.load(content, Loader=SafeLoader)
+    except yaml.YAMLError as exc:
+        raise SigmaParseError(f"Invalid YAML syntax: {exc}") from exc
 
     if data is None:
         raise SigmaParseError("Rule file is empty")
