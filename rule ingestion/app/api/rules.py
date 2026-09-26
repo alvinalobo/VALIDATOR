@@ -218,6 +218,10 @@ async def ingest_rules(req: RuleIngestRequest):
     return rules
 # ============================================================
 # RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
+@router.get("", response_model=List[ParsedRule])
+async def get_all_rules():
+    """Return all ingested rules for downstream pod integration."""
+    return list(INGESTED_RULES.values())
 # ============================================================
 @router.get("/search", response_model=Union[RuleSearchResponse, PaginatedRuleResponse, List[ParsedRule]])
 async def search_rules(
