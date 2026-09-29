@@ -102,10 +102,10 @@ async def register_connector(
 async def registered_connectors():
     return {
         "count": len(
-            ConnectorRegistry._connectors
+            ConnectorRegistry.list()
         ),
         "vendors": list(
-            ConnectorRegistry._connectors.keys()
+            ConnectorRegistry.list().keys()
         ),
     }
 

@@ -138,3 +138,8 @@ class ConnectorRegistry:
             )
 
         return cls._connectors[vendor_key]
+
+    @classmethod
+    def list(cls) -> Dict[str, Type[BaseConnector]]:
+        """Return all registered connectors."""
+        return dict(cls._connectors)
