@@ -4,6 +4,9 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from app.models.detection_rule import DetectionRule
+from app.services.database import SessionLocal, create_tables
  
  
 class RuleHasDependentsError(Exception):
@@ -67,6 +70,35 @@ class RuleDependencyTracker:
         with self._lock:
             self._dependencies.setdefault(rule_id, []).append(dep)
             self._save()
+
+            # Persist dependency usage in the shared detection-rule store.
+            try:
+                create_tables()
+                db = SessionLocal()
+                try:
+                    rule = (
+                        db.query(DetectionRule)
+                        .filter(DetectionRule.content_hash == rule_id)
+                        .first()
+                    )
+                    if rule is not None:
+                        metadata = dict(dep.metadata)
+                        metadata.update({
+                            "dependent_type": dep.dependent_type,
+                            "dependent_id": dep.dependent_id,
+                            "recorded_at": dep.recorded_at,
+                        })
+                        tags = list(rule.tags or [])
+                        tags.append({"dependency": metadata})
+                        rule.tags = tags
+                        rule.updated_at = datetime.now(timezone.utc)
+                        db.commit()
+                finally:
+                    db.close()
+            except Exception:
+                # Preserve tracker behavior when the shared DB is unavailable
+                # or the rule has not yet been ingested.
+                pass
  
     def get_dependents(self, rule_id: str) -> List[Dependency]:
         """Return every recorded dependent of `rule_id`, oldest first."""
