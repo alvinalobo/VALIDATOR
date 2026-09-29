@@ -36,7 +36,7 @@ Docker:
 
 ```bash
 docker build -f Dockerfile -t rule-ingestion .
-docker run -p 8000:8000 rule-ingestion
+docker run -p 8001:8001 rule-ingestion
 ```
 
 ---
@@ -72,7 +72,7 @@ files, parse and validate them, and record each revision in the version store.
 | `tags` | list of string | `null` | Tags applied to every ingested rule. |
 
 ```bash
-curl -X POST http://localhost:8000/api/v2/rules/ingest \
+curl -X POST http://localhost:8001/api/v2/rules/ingest \
   -H 'Content-Type: application/json' \
   -d '{"repo_url": "https://github.com/SigmaHQ/sigma.git", "branch": "main"}'
 ```
@@ -102,7 +102,7 @@ Pagination metadata is always returned as headers, regardless of `paginated`:
 `X-Has-Prev`.
 
 ```bash
-curl 'http://localhost:8000/api/v2/rules/search?severity=critical&paginated=true'
+curl 'http://localhost:8001/api/v2/rules/search?severity=critical&paginated=true'
 ```
 
 #### `GET /api/v2/rules/{rule_id}`
