@@ -9,6 +9,8 @@ import git
 
 from pydantic import BaseModel
 from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum, PaginatedRuleResponse
+from app.models.detection_rule import DetectionRule
+from app.services.database import SessionLocal, create_tables
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
 
@@ -119,8 +121,42 @@ async def ingest_rules(req: RuleIngestRequest):
                 is_active=parsed_dict.get("is_active", True)
             )
             rules.append(parsed)
-            # Store in database
+            # Keep the compatibility cache for existing callers/tests.
             INGESTED_RULES[parsed.rule_id] = parsed
+
+            # Persist the latest rule in the shared detection_rules store.
+            db = SessionLocal()
+            try:
+                existing = (
+                    db.query(DetectionRule)
+                    .filter(DetectionRule.content_hash == parsed.content_hash)
+                    .first()
+                )
+
+                if existing is None:
+                    db_rule = DetectionRule(
+                        id=hashlib.md5(parsed.content_hash.encode()).hexdigest(),
+                        rule_id=parsed.rule_id,
+                        version=str(parsed.version),
+                        title=parsed.title,
+                        description=parsed.description,
+                        author=parsed.author,
+                        status="active" if parsed.is_active else "deprecated",
+                        rule_format=parsed.rule_format.value,
+                        severity=parsed.severity,
+                        content_hash=parsed.content_hash,
+                        syntax_valid=parsed.syntax_valid,
+                        validation_errors=parsed.validation_errors,
+                        mitre_techniques=parsed.mitre_techniques,
+                        detection_logic=parsed.detection_logic,
+                        tags=parsed.tags,
+                        created_at=parsed.created_at,
+                        updated_at=parsed.updated_at,
+                    )
+                    db.add(db_rule)
+                    db.commit()
+            finally:
+                db.close()
         elif error_msg:
             parsed = ParsedRule(
                 rule_id="UNKNOWN",
