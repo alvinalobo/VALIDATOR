@@ -13,6 +13,7 @@ from app.models.detection_rule import DetectionRule
 from app.services.database import SessionLocal, create_tables
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
+from app.messaging.evidence_publisher import EvidencePublisher
 from app.services.rule_dependency_tracker import RuleDependencyTracker, RuleHasDependentsError
 from app.services.rule_versioning import rule_versioning_service, RuleVersioningError
 
@@ -23,6 +24,7 @@ INGESTED_RULES: Dict[str, ParsedRule] = {}
 
 # Process-wide dependency tracker used by the rule APIs.
 dependency_tracker = RuleDependencyTracker()
+evidence_publisher = EvidencePublisher()
 
 class RuleSearchResponse(BaseModel):
     items: List[ParsedRule]
@@ -160,6 +162,19 @@ async def ingest_rules(req: RuleIngestRequest):
                     )
                     db.add(db_rule)
                     db.commit()
+
+                evidence_publisher.publish_evidence({
+                    "event_id": parsed.content_hash,
+                    "action_id": parsed.rule_id,
+                    "evidence": {
+                        "type": "detection_rule",
+                        "rule_id": parsed.rule_id,
+                        "title": parsed.title,
+                        "content_hash": parsed.content_hash,
+                        "rule_format": parsed.rule_format.value,
+                        "detection_logic": parsed.detection_logic,
+                    },
+                })
             finally:
                 db.close()
         elif error_msg:
