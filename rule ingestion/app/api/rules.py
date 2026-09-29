@@ -1,6 +1,6 @@
 import math
 from math import ceil
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from typing import List, Dict, Optional, Union
 import os
 import hashlib
@@ -13,11 +13,16 @@ from app.models.detection_rule import DetectionRule
 from app.services.database import SessionLocal, create_tables
 from app.services.sigma_parser import parse_sigma_rule
 from app.services.kql_parser import parse_kql_rule
+from app.services.rule_dependency_tracker import RuleDependencyTracker, RuleHasDependentsError
+from app.services.rule_versioning import rule_versioning_service, RuleVersioningError
 
 router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
 
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
+
+# Process-wide dependency tracker used by the rule APIs.
+dependency_tracker = RuleDependencyTracker()
 
 class RuleSearchResponse(BaseModel):
     items: List[ParsedRule]
@@ -303,36 +308,180 @@ async def search_rules(
 async def get_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-    return INGESTED_RULES[rule_id]
 
 @router.post("/{rule_id}/deprecate")
 async def deprecate_rule(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
     rule = INGESTED_RULES[rule_id]
     rule.is_active = False
+
+    try:
+        rule_versioning_service.get_version_number(rule_id, 1)
+        rule_versioning_service.deprecate(rule_id)
+    except RuleVersioningError:
+        rule_versioning_service.record_version(
+            rule_id=rule_id,
+            content_hash=rule.content_hash,
+            title=rule.title,
+            rule_format=rule.rule_format.value if hasattr(rule.rule_format, "value") else str(rule.rule_format),
+        )
+        rule_versioning_service.deprecate(rule_id)
+
+    dependencies = dependency_tracker.get_dependents(rule.content_hash)
+
     return {
         "message": f"Rule '{rule_id}' was successfully deprecated.",
         "rule_id": rule_id,
-        "is_active": False
+        "is_active": False,
+        "dependent_count": len(dependencies),
     }
+
 
 @router.get("/{rule_id}/dependencies")
 async def get_rule_dependencies(rule_id: str):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-    
-    # Mocking rule dependencies (historical validation runs that used this rule)
-    if rule_id == "b2345678-9abc-def0-1234-56789abcdef0":
-        return {
-            "rule_id": rule_id,
-            "dependencies": [
-                {"run_id": "run-001", "action_id": "act-501", "status": "active"},
-                {"run_id": "run-002", "action_id": "act-502", "status": "completed"}
-            ]
-        }
-    
+
+    rule = INGESTED_RULES[rule_id]
+    dependencies = dependency_tracker.get_dependents(rule.content_hash)
+
     return {
         "rule_id": rule_id,
-        "dependencies": []
+        "dependent_count": len(dependencies),
+        "safe_to_delete": len(dependencies) == 0,
+        "dependencies": [
+            {
+                "dependent_type": dep.dependent_type,
+                "dependent_id": dep.dependent_id,
+                "recorded_at": dep.recorded_at,
+                "metadata": dep.metadata,
+            }
+            for dep in dependencies
+        ],
+    }
+
+
+@router.post("/{rule_id}/dependencies")
+async def record_rule_dependency(rule_id: str, payload: Dict[str, object], response: Response):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    dependent_type = payload.get("dependent_type")
+    dependent_id = payload.get("dependent_id")
+    metadata = payload.get("metadata") or {}
+
+    allowed_types = {"validation_run", "action", "revalidation_run"}
+
+    if dependent_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid dependent_type. Expected one of: {sorted(allowed_types)}",
+        )
+
+    if not dependent_id:
+        raise HTTPException(status_code=400, detail="dependent_id is required")
+
+    rule = INGESTED_RULES[rule_id]
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=400, detail="metadata must be an object")
+
+    dependency_tracker.record_usage(
+        rule.content_hash,
+        dependent_type,
+        dependent_id,
+        metadata=metadata,
+    )
+    response.status_code = status.HTTP_201_CREATED
+
+    return {
+        "rule_id": rule_id,
+        "dependent_type": dependent_type,
+        "dependent_id": dependent_id,
+        "message": "Dependency recorded successfully.",
+    }
+
+
+@router.get("/{rule_id}/impact")
+async def get_rule_impact(rule_id: str):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    rule = INGESTED_RULES[rule_id]
+    dependencies = dependency_tracker.get_dependents(rule.content_hash)
+
+    return {
+        "rule_id": rule_id,
+        "dependent_count": len(dependencies),
+        "safe_to_delete": len(dependencies) == 0,
+        "safe_to_edit": len(dependencies) == 0,
+        "dependencies": [
+            {
+                "dependent_type": dep.dependent_type,
+                "dependent_id": dep.dependent_id,
+                "recorded_at": dep.recorded_at,
+                "metadata": dep.metadata,
+            }
+            for dep in dependencies
+        ],
+    }
+
+
+@router.post("/{rule_id}/restore")
+async def restore_rule(rule_id: str):
+    if rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    rule = INGESTED_RULES[rule_id]
+    rule.is_active = True
+
+    try:
+        rule_versioning_service.restore(rule_id)
+    except RuleVersioningError:
+        pass
+
+    return {
+        "message": f"Rule '{rule_id}' was successfully restored.",
+        "rule_id": rule_id,
+        "is_active": True,
+    }
+
+
+@router.get("/{rule_id}/versions")
+async def get_rule_versions(rule_id: str):
+    history = rule_versioning_service.get_history(rule_id)
+
+    if not history and rule_id not in INGESTED_RULES:
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    summary = rule_versioning_service.history_summary(rule_id)
+
+    return summary
+
+
+@router.get("/{rule_id}/versions/{version}")
+async def get_rule_version(rule_id: str, version: int):
+    if rule_id not in INGESTED_RULES and not rule_versioning_service.get_history(rule_id):
+        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+
+    record = rule_versioning_service.get_version_number(rule_id, version)
+
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Version {version} for rule '{rule_id}' not found",
+        )
+
+    return {
+        "rule_id": record.rule_id,
+        "version": record.version,
+        "content_hash": record.content_hash,
+        "title": record.title,
+        "rule_format": record.rule_format,
+        "status": record.status,
+        "is_latest": record.is_latest,
+        "parent_content_hash": record.parent_content_hash,
+        "change_log": record.change_log,
+        "recorded_at": record.recorded_at,
     }
