@@ -15,83 +15,65 @@ depends_on = None
 
 
 def upgrade():
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
+    # Tenant scoping moves the uniqueness guarantees from (rule_id, version)
+    # and (content_hash) to tenant-prefixed variants, so two tenants can hold
+    # identical rule content without colliding. Written with plain op.* calls
+    # so it renders correctly in offline `--sql` mode (the CI check path).
+    op.add_column(
+        "detection_rules",
+        sa.Column("tenant_id", sa.String(length=255), nullable=True),
+    )
+    op.create_index(
+        "ix_detection_rules_tenant_id",
+        "detection_rules",
+        ["tenant_id"],
+    )
 
-    columns = {
-        column["name"]
-        for column in inspector.get_columns("detection_rules")
-    }
-
-    if "tenant_id" not in columns:
-        op.add_column(
-            "detection_rules",
-            sa.Column("tenant_id", sa.String(length=255), nullable=True),
-        )
-
-    indexes = {
-        index["name"]
-        for index in inspector.get_indexes("detection_rules")
-    }
-
-    if "ix_detection_rules_tenant_id" not in indexes:
-        op.create_index(
-            "ix_detection_rules_tenant_id",
-            "detection_rules",
-            ["tenant_id"],
-        )
-
-    with op.batch_alter_table("detection_rules") as batch_op:
-        try:
-            batch_op.drop_constraint("uq_rule_version", type_="unique")
-        except Exception:
-            pass
-
-        try:
-            batch_op.drop_constraint("uq_content_hash", type_="unique")
-        except Exception:
-            pass
-
-        batch_op.create_unique_constraint(
-            "uq_tenant_rule_version",
-            ["tenant_id", "rule_id", "version"],
-        )
-        batch_op.create_unique_constraint(
-            "uq_tenant_content_hash",
-            ["tenant_id", "content_hash"],
-        )
+    op.drop_constraint(
+        "uq_rule_version",
+        "detection_rules",
+        type_="unique",
+    )
+    op.drop_constraint(
+        "uq_content_hash",
+        "detection_rules",
+        type_="unique",
+    )
+    op.create_unique_constraint(
+        "uq_tenant_rule_version",
+        "detection_rules",
+        ["tenant_id", "rule_id", "version"],
+    )
+    op.create_unique_constraint(
+        "uq_tenant_content_hash",
+        "detection_rules",
+        ["tenant_id", "content_hash"],
+    )
 
 
 def downgrade():
-    with op.batch_alter_table("detection_rules") as batch_op:
-        batch_op.drop_constraint(
-            "uq_tenant_content_hash",
-            type_="unique",
-        )
-        batch_op.drop_constraint(
-            "uq_tenant_rule_version",
-            type_="unique",
-        )
-
-        batch_op.create_unique_constraint(
-            "uq_content_hash",
-            ["content_hash"],
-        )
-        batch_op.create_unique_constraint(
-            "uq_rule_version",
-            ["rule_id", "version"],
-        )
-
-    bind = op.get_bind()
-    inspector = sa.inspect(bind)
-
-    indexes = {
-        index["name"]
-        for index in inspector.get_indexes("detection_rules")
-    }
-
-    if "ix_detection_rules_tenant_id" in indexes:
-        op.drop_index(
-            "ix_detection_rules_tenant_id",
-            table_name="detection_rules",
-        )
+    op.drop_constraint(
+        "uq_tenant_content_hash",
+        "detection_rules",
+        type_="unique",
+    )
+    op.drop_constraint(
+        "uq_tenant_rule_version",
+        "detection_rules",
+        type_="unique",
+    )
+    op.create_unique_constraint(
+        "uq_content_hash",
+        "detection_rules",
+        ["content_hash"],
+    )
+    op.create_unique_constraint(
+        "uq_rule_version",
+        "detection_rules",
+        ["rule_id", "version"],
+    )
+    op.drop_index(
+        "ix_detection_rules_tenant_id",
+        table_name="detection_rules",
+    )
+    op.drop_column("detection_rules", "tenant_id")
