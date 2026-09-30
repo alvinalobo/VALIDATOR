@@ -432,9 +432,6 @@ async def get_rule_dependencies(rule_id: str, tenant_id: str = Depends(get_curre
 
 @router.post("/{rule_id}/dependencies")
 async def record_rule_dependency(rule_id: str, payload: Dict[str, object], response: Response, tenant_id: str = Depends(get_current_tenant)):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-
     dependent_type = payload.get("dependent_type")
     dependent_id = payload.get("dependent_id")
     metadata = payload.get("metadata") or {}
@@ -450,7 +447,7 @@ async def record_rule_dependency(rule_id: str, payload: Dict[str, object], respo
     if not dependent_id:
         raise HTTPException(status_code=400, detail="dependent_id is required")
 
-    rule = INGESTED_RULES[rule_id]
+    rule = _get_tenant_rule(rule_id, tenant_id)
     if not isinstance(metadata, dict):
         raise HTTPException(status_code=400, detail="metadata must be an object")
 
