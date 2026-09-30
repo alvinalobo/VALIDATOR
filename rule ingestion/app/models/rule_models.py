@@ -266,6 +266,53 @@ class RuleIngestResponse(BaseModel):
     )
 
 
+class SyntaxValidationReport(BaseModel):
+    """
+    Report generated after validating a rule.
+
+    Attributes:
+        rule_id: Identifier of validated rule
+        file_name: Source file path
+        syntax_valid: Whether validation passed
+        validation_errors: List of errors found
+        validation_warnings: Non-critical warnings
+        validated_at: When validation occurred
+    """
+    rule_id: str = Field(
+        ...,
+        description="Rule identifier"
+    )
+    file_name: str = Field(
+        ...,
+        description="Source rule file path or name"
+    )
+    syntax_valid: bool = Field(
+        ...,
+        description="Whether rule passed syntax validation"
+    )
+    validation_errors: List[str] = Field(
+        default_factory=list,
+        description="Critical validation errors"
+    )
+    validation_warnings: List[str] = Field(
+        default_factory=list,
+        description="Non-critical validation warnings"
+    )
+    validated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When validation was performed"
+    )
+
+    @model_validator(mode="after")
+    def validate_error_consistency(self):
+        """Ensure error list is empty when valid"""
+        if self.syntax_valid and self.validation_errors:
+            raise ValueError(
+                "Cannot be valid (syntax_valid=True) with errors present"
+            )
+        return self
+
+
 class BulkValidationResponse(BaseModel):
     """
     Response model for bulk rule validation.
