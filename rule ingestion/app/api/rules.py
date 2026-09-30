@@ -172,7 +172,10 @@ async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_curr
         
     rule_files = discover_rule_files(repo_path, req.rule_types)
     rules = []
-    
+
+    # Ensure the shared detection_rules store exists before the write loop.
+    create_tables()
+
     for f in rule_files:
         try:
             with open(f, 'r', encoding='utf-8') as file_obj:
