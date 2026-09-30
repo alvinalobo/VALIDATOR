@@ -583,10 +583,16 @@ async def restore_rule(rule_id: str, tenant_id: str = Depends(get_current_tenant
 
 @router.get("/{rule_id}/versions")
 async def get_rule_versions(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    rule = _get_tenant_rule(rule_id, tenant_id)
     history = rule_versioning_service.get_history(rule_id)
 
-    if not history and rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    if not history:
+        rule_versioning_service.record_version(
+            rule_id=rule_id,
+            content_hash=rule.content_hash,
+            title=rule.title,
+            rule_format=rule.rule_format.value if hasattr(rule.rule_format, "value") else str(rule.rule_format),
+        )
 
     summary = rule_versioning_service.history_summary(rule_id)
 
@@ -595,8 +601,15 @@ async def get_rule_versions(rule_id: str, tenant_id: str = Depends(get_current_t
 
 @router.get("/{rule_id}/versions/{version}")
 async def get_rule_version(rule_id: str, version: int, tenant_id: str = Depends(get_current_tenant)):
-    if rule_id not in INGESTED_RULES and not rule_versioning_service.get_history(rule_id):
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+    rule = _get_tenant_rule(rule_id, tenant_id)
+
+    if not rule_versioning_service.get_history(rule_id):
+        rule_versioning_service.record_version(
+            rule_id=rule_id,
+            content_hash=rule.content_hash,
+            title=rule.title,
+            rule_format=rule.rule_format.value if hasattr(rule.rule_format, "value") else str(rule.rule_format),
+        )
 
     record = rule_versioning_service.get_version_number(rule_id, version)
 
