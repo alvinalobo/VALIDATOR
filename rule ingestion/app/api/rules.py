@@ -1,5 +1,6 @@
 import math
 from math import ceil
+from copy import deepcopy
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from typing import List, Dict, Optional, Union
 import os
@@ -25,6 +26,13 @@ router = APIRouter(prefix="/api/v2/rules", tags=["rules"], dependencies=[Depends
 
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
+
+# Content-addressed parse cache (W13). A large rule repository (1000+ rules)
+# routinely contains the same content in several places — vendor packs, forks,
+# copied directories. Parsing dominates ingest cost (~10 ms/rule with pySigma),
+# so identical bytes are parsed once and the stored result is returned as a copy.
+_PARSE_CACHE: Dict[tuple, tuple] = {}
+_PARSE_CACHE_MAX_ENTRIES = 5000
 
 # Process-wide dependency tracker used by the rule APIs.
 dependency_tracker = RuleDependencyTracker()
@@ -115,6 +123,46 @@ def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
                     discovered.append(os.path.join(root, file))
     return sorted(discovered)
 
+def _parse_rule_content(raw: str, file_path: str):
+    """
+    Parse one rule file's contents, memoised on (content hash, extension).
+
+    Returns (parsed_dict, rule_format, error_msg).
+
+    Identical bytes always parse to an identical result, so the cache is exact
+    rather than heuristic. Results are deep-copied on the way in and out so
+    that two rules sharing the same source content never alias the same
+    mutable dicts.
+    """
+    suffix = os.path.splitext(file_path)[1].lower()
+    content_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    cache_key = (content_hash, suffix)
+
+    cached = _PARSE_CACHE.get(cache_key)
+    if cached is not None:
+        return deepcopy(cached[0]), cached[1], cached[2]
+
+    parsed_dict = None
+    rule_format = None
+    error_msg = None
+    try:
+        if suffix in (".yml", ".yaml"):
+            parsed_dict = parse_sigma_rule(raw)
+            rule_format = RuleFormatEnum.SIGMA
+        elif suffix in (".kql"):
+            parsed_dict = parse_kql_rule(raw)
+            rule_format = RuleFormatEnum.KQL
+    except Exception as e:
+        error_msg = str(e)
+        rule_format = RuleFormatEnum.SIGMA if suffix in (".yml", ".yaml") else RuleFormatEnum.KQL
+
+    if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX_ENTRIES:
+        _PARSE_CACHE.clear()
+    _PARSE_CACHE[cache_key] = (deepcopy(parsed_dict), rule_format, error_msg)
+
+    return parsed_dict, rule_format, error_msg
+
+
 @router.post("/ingest", response_model=List[ParsedRule])
 async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_current_tenant)):
     try:
@@ -135,19 +183,7 @@ async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_curr
             
         h = hashlib.sha256(raw.encode('utf-8')).hexdigest()
         
-        parsed_dict = None
-        rule_format = None
-        error_msg = None
-        try:
-            if f.endswith('.yml') or f.endswith('.yaml'):
-                parsed_dict = parse_sigma_rule(raw)
-                rule_format = RuleFormatEnum.SIGMA
-            elif f.endswith('.kql'):
-                parsed_dict = parse_kql_rule(raw)
-                rule_format = RuleFormatEnum.KQL
-        except Exception as e:
-            error_msg = str(e)
-            rule_format = RuleFormatEnum.SIGMA if (f.endswith('.yml') or f.endswith('.yaml')) else RuleFormatEnum.KQL
+        parsed_dict, rule_format, error_msg = _parse_rule_content(raw, f)
             
         if parsed_dict:
             raw_data = parsed_dict.get("raw", {})
@@ -223,7 +259,8 @@ async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_curr
                 db.close()
         elif error_msg:
             parsed = ParsedRule(
-                rule_id="UNKNOWN",
+                rule_id=h,
+                tenant_id=tenant_id,
                 title="UNKNOWN",
                 content_hash=h,
                 rule_format=rule_format,
