@@ -21,15 +21,15 @@ class EvidencePublisher:
             bootstrap_servers
             or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
         )
-        self._producer = (
-            producer or Producer({"bootstrap.servers": self.bootstrap_servers})
+        self._producer = producer if producer is not None else (
+            Producer({"bootstrap.servers": self.bootstrap_servers})
             if self.enabled
             else None
         )
 
     def publish_evidence(self, event: Dict[str, Any]) -> None:
         """Publish one evidence event as JSON when Kafka publishing is enabled."""
-        if not self.enabled or self._producer is None:
+        if self._producer is None:
             return
 
         payload = json.dumps(
