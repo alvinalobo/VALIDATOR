@@ -281,13 +281,47 @@ async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_curr
 # ============================================================
 
 def _get_tenant_rule(rule_id: str, tenant_id: str) -> ParsedRule:
-    rule = INGESTED_RULES.get(rule_id)
-    if rule is None or rule.tenant_id != tenant_id:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Rule with ID {rule_id} not found",
+    db = SessionLocal()
+    try:
+        rule = (
+            db.query(DetectionRule)
+            .filter(
+                DetectionRule.rule_id == rule_id,
+                DetectionRule.tenant_id == tenant_id,
+                DetectionRule.is_latest.is_(True),
+            )
+            .first()
         )
-    return rule
+        if rule is None:
+            cached = INGESTED_RULES.get(rule_id)
+            if cached is not None and cached.tenant_id == tenant_id:
+                return cached
+            raise HTTPException(
+                status_code=404,
+                detail=f"Rule with ID {rule_id} not found",
+            )
+
+        return ParsedRule(
+            tenant_id=rule.tenant_id,
+            rule_id=rule.rule_id,
+            version=rule.version,
+            title=rule.title,
+            description=rule.description,
+            author=rule.author,
+            content_hash=rule.content_hash,
+            rule_format=RuleFormatEnum(rule.rule_format),
+            mitre_techniques=rule.mitre_techniques or [],
+            detection_logic=rule.detection_logic,
+            syntax_valid=rule.syntax_valid,
+            validation_errors=rule.validation_errors or [],
+            severity=rule.severity,
+            tags=rule.tags or [],
+            is_active=rule.status == "active",
+            created_at=rule.created_at,
+            updated_at=rule.updated_at,
+        )
+    finally:
+        db.close()
 
 
 @router.get("/search", response_model=Union[RuleSearchResponse, PaginatedRuleResponse, List[ParsedRule]])
