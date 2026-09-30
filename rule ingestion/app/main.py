@@ -101,13 +101,18 @@ def home():
 
 @app.get("/health", tags=["health"], summary="Service health check")
 def health():
-    """Check that the service can reach its database."""
+    """Liveness plus a real dependency probe, using the cross-pod {status, service}
+    envelope so downstream pods (Beta's ALPHA_RULES_UNAVAILABLE path, Delta's
+    registry) can distinguish this service from the others.
+
+    The database is the one dependency a live pod must reach, so a failed read
+    surfaces as `degraded` rather than crashing or reporting a healthy string."""
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        return {"status": "healthy", "database": "healthy"}
+        return {"status": "ok", "service": "rule-ingestion"}
     except Exception:
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "database": "unhealthy"},
+            content={"status": "degraded", "service": "rule-ingestion"},
         )

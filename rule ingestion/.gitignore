@@ -16,6 +16,9 @@ ENV/
 repositories/
 .cloned_repos/
 
+# Local SQLite rule store (created by test runs)
+rule_ingestion.db
+
 # IDE
 .vscode/
 .idea/
