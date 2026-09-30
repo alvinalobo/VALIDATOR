@@ -1,4 +1,5 @@
 import json
+import os
 
 from app.messaging.evidence_publisher import EVIDENCE_TOPIC, EvidencePublisher
 
@@ -17,7 +18,8 @@ class FakeProducer:
         return 0
 
 
-def test_evidence_publisher_uses_shared_topic():
+def test_evidence_publisher_uses_shared_topic(monkeypatch):
+    monkeypatch.setenv("KAFKA_EVIDENCE_ENABLED", "true")
     producer = FakeProducer()
     publisher = EvidencePublisher(
         bootstrap_servers="localhost:9092",

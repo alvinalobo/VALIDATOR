@@ -2,6 +2,7 @@ import os
 import sys
 import pytest
 from fastapi.testclient import TestClient
+from jose import jwt
 
 # Configure python search path to root
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -12,7 +13,18 @@ from app.main import app
 from app.api.rules import INGESTED_RULES
 from app.models.rule_models import ParsedRule, RuleFormatEnum
 
-client = TestClient(app)
+os.environ["SECRET_KEY"] = "test-secret-key"
+_TEST_TENANT = "test-tenant"
+_TOKEN = jwt.encode(
+    {"tenant_id": _TEST_TENANT},
+    os.environ["SECRET_KEY"],
+    algorithm="HS256",
+)
+
+client = TestClient(
+    app,
+    headers={"Authorization": f"Bearer {_TOKEN}"},
+)
 
 @pytest.fixture(autouse=True)
 def clean_db():
@@ -22,6 +34,7 @@ def clean_db():
 def populate_rules():
     # 1. Active Sigma Rule, Critical Severity, Technique T1486, tag: attack.impact
     rule1 = ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id="rule-sigma-01",
         title="Sigma File Encryption",
         description="Detects ransomware encrypting files",
@@ -38,6 +51,7 @@ def populate_rules():
     )
     # 2. Inactive Sigma Rule, Low Severity, Technique T1059.001, tag: attack.execution
     rule2 = ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id="rule-sigma-02",
         title="Sigma Powershell",
         description="Deprecated PowerShell check",
@@ -54,6 +68,7 @@ def populate_rules():
     )
     # 3. Active KQL Rule, High Severity, Technique T1059, tag: attack.execution
     rule3 = ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id="rule-kql-01",
         title="KQL Command Line check",
         description="KQL technique mapping check",

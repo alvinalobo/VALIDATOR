@@ -23,7 +23,13 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-POSTGRES_URL = "postgresql://postgres:postgres@localhost:5432/rule_ingestion"
+# The offline `--sql` render only needs the dialect, so a real database is
+# never contacted. Use DATABASE_URL when present (m7: no credential literal in
+# tracked files); fall back to a clearly fake, non-secret placeholder that still
+# selects the PostgreSQL dialect.
+POSTGRES_URL = os.getenv(
+    "DATABASE_URL", "postgresql://user:pass@localhost:5432/rule_ingestion_db"
+)
 
 
 def _run_alembic(*args: str) -> subprocess.CompletedProcess:
@@ -52,7 +58,7 @@ def test_revision_is_discovered_as_the_only_head():
 
     heads = [line for line in result.stdout.splitlines() if line.strip()]
     assert len(heads) == 1, f"expected exactly one head, got {heads}"
-    assert "001_create_detection_rules" in heads[0]
+    assert "002_add_tenant_scoping" in heads[0]
 
 
 def test_upgrade_emits_the_detection_rules_table():
@@ -69,20 +75,23 @@ def test_upgrade_emits_the_detection_rules_table():
         # Every column the service relies on for version tracking.
         "rule_id VARCHAR(255) NOT NULL",
         "version VARCHAR(20)",
-        "parent_rule_id UUID",
+        "parent_rule_id VARCHAR(36)",
         "is_latest BOOLEAN",
         "content_hash VARCHAR(64) NOT NULL",
-        "detection_logic JSONB NOT NULL",
-        "mitre_techniques JSONB",
+        "detection_logic JSON NOT NULL",
+        "mitre_techniques JSON",
         "syntax_valid BOOLEAN",
-        # Uniqueness: one row per rule revision, one row per distinct content.
-        "CONSTRAINT uq_rule_version UNIQUE (rule_id, version)",
-        "CONSTRAINT uq_content_hash UNIQUE (content_hash)",
+        # Uniqueness: one row per tenant rule revision, one row per tenant
+        # distinct content (002_add_tenant_scoping re-scopes the guarantees
+        # that 001 established at the table level).
+        "ALTER TABLE detection_rules ADD CONSTRAINT uq_tenant_rule_version UNIQUE (tenant_id, rule_id, version)",
+        "ALTER TABLE detection_rules ADD CONSTRAINT uq_tenant_content_hash UNIQUE (tenant_id, content_hash)",
         # Lookup indexes used by search/ingest.
         "CREATE INDEX ix_detection_rules_rule_id",
         "CREATE INDEX ix_detection_rules_content_hash",
         "CREATE INDEX ix_detection_rules_is_latest",
         "CREATE INDEX ix_detection_rules_status",
+        "CREATE INDEX ix_detection_rules_tenant_id",
     ],
 )
 def test_upgrade_emits_expected_schema_elements(expected):

@@ -1,8 +1,22 @@
+import os
+
 import pytest
 from app.main import app
 from fastapi.testclient import TestClient
+from jose import jwt
 
-client = TestClient(app)
+os.environ["SECRET_KEY"] = "test-secret-key"
+_TEST_TENANT = "test-tenant"
+_TOKEN = jwt.encode(
+    {"tenant_id": _TEST_TENANT},
+    os.environ["SECRET_KEY"],
+    algorithm="HS256",
+)
+
+client = TestClient(
+    app,
+    headers={"Authorization": f"Bearer {_TOKEN}"},
+)
 
 
 def test_deprecate_rule():
@@ -11,6 +25,7 @@ def test_deprecate_rule():
     from app.models.rule_models import ParsedRule, RuleFormatEnum
 
     rule = ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id="test-rule-001",
         title="Test Rule",
         description="A test rule",
@@ -34,6 +49,7 @@ def test_get_rule():
     from app.models.rule_models import ParsedRule, RuleFormatEnum
 
     rule = ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id="test-rule-002",
         title="Test Rule 2",
         description="Another test rule",

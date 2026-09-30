@@ -1,13 +1,26 @@
 from datetime import datetime, timedelta, timezone
 
+import os
 from fastapi.testclient import TestClient
+from jose import jwt
 
 from app.main import app
 from app.api.rules import INGESTED_RULES
 from app.models.rule_models import ParsedRule, RuleFormatEnum
 
 
-client = TestClient(app)
+os.environ["SECRET_KEY"] = "test-secret-key"
+_TEST_TENANT = "test-tenant"
+_TOKEN = jwt.encode(
+    {"tenant_id": _TEST_TENANT},
+    os.environ["SECRET_KEY"],
+    algorithm="HS256",
+)
+
+client = TestClient(
+    app,
+    headers={"Authorization": f"Bearer {_TOKEN}"},
+)
 
 
 def make_rule(
@@ -23,6 +36,7 @@ def make_rule(
 ):
     created_at = created_at or datetime.now(timezone.utc)
     return ParsedRule(
+        tenant_id=_TEST_TENANT,
         rule_id=rule_id,
         title=title,
         description=f"Detection for {title}",

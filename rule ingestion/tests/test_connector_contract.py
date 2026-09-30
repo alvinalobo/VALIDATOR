@@ -46,7 +46,7 @@ CONNECTOR_CONFIGS = {
     ),
     "crowdstrike_logscale": ConnectorConfig(
         connector_id="contract-crowdstrike",
-        vendor="crowdstrike",
+        vendor="crowdstrike_logscale",
         product="logscale",
         credentials={
             "host": "http://mock-crowdstrike",
