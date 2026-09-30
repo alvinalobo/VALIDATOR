@@ -14,7 +14,8 @@ import logging
 from pathlib import Path
 from typing import List, Tuple
 
-from app.models.rule_models import ParsedRule, RuleFormat, SyntaxValidationReport
+from app.models.rule_models import ParsedRule, RuleFormat
+from app.services.rule_models import SyntaxValidationReport
 from app.services.hashing import compute_sha256
 from app.services.sigma_parser import parse_sigma_rule, SigmaParseError
 from app.services.kql_parser import parse_kql_rule, KqlParseError
