@@ -1,6 +1,6 @@
 import math
 from math import ceil
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from typing import List, Dict, Optional, Union
 import os
 import hashlib
@@ -17,7 +17,8 @@ from app.messaging.evidence_publisher import EvidencePublisher
 from app.services.rule_dependency_tracker import RuleDependencyTracker, RuleHasDependentsError
 from app.services.rule_versioning import rule_versioning_service, RuleVersioningError
 
-router = APIRouter(prefix="/api/v2/rules", tags=["rules"])
+from app.security.security import get_current_claims, get_current_tenant
+router = APIRouter(prefix="/api/v2/rules", tags=["rules"], dependencies=[Depends(get_current_claims)])
 
 # In-memory database of parsed rules
 INGESTED_RULES: Dict[str, ParsedRule] = {}
@@ -74,7 +75,7 @@ def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:
     return sorted(discovered)
 
 @router.post("/ingest", response_model=List[ParsedRule])
-async def ingest_rules(req: RuleIngestRequest):
+async def ingest_rules(req: RuleIngestRequest, tenant_id: str = Depends(get_current_tenant)):
     try:
         repo_path = clone_repo(req.repo_url, req.branch)
     except Exception as e:
@@ -113,6 +114,7 @@ async def ingest_rules(req: RuleIngestRequest):
             severity = raw_data.get("severity") or raw_data.get("level")
             
             parsed = ParsedRule(
+                tenant_id=tenant_id,
                 rule_id=h,
                 title=parsed_dict["title"],
                 description=parsed_dict.get("description"),
@@ -143,6 +145,7 @@ async def ingest_rules(req: RuleIngestRequest):
                 if existing is None:
                     db_rule = DetectionRule(
                         id=hashlib.md5(parsed.content_hash.encode()).hexdigest(),
+                        tenant_id=tenant_id,
                         rule_id=parsed.rule_id,
                         version=str(parsed.version),
                         title=parsed.title,
@@ -195,9 +198,24 @@ async def ingest_rules(req: RuleIngestRequest):
 # RULE SEARCH / FILTER / PAGINATION API (Defined before /{rule_id})
 # ============================================================
 
+# ============================================================
+# TENANT-SCOPED RULE ACCESS
+# ============================================================
+
+def _get_tenant_rule(rule_id: str, tenant_id: str) -> ParsedRule:
+    rule = INGESTED_RULES.get(rule_id)
+    if rule is None or rule.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Rule with ID {rule_id} not found",
+        )
+    return rule
+
+
 @router.get("/search", response_model=Union[RuleSearchResponse, PaginatedRuleResponse, List[ParsedRule]])
 async def search_rules(
     response: Response = None,
+    tenant_id: str = Depends(get_current_tenant),
     q: str = Query(default="", description="Search term (matches title, description, tags)"),
     status: str = Query(default=None, description="Filter by status: active, deprecated"),
     severity: str = Query(default=None, description="Filter by severity: low, medium, high, critical"),
@@ -212,7 +230,7 @@ async def search_rules(
     """
     Search and filter rules with pagination and sorting.
     """
-    results = list(INGESTED_RULES.values())
+    results = [r for r in INGESTED_RULES.values() if r.tenant_id == tenant_id]
 
     # --- Filter by search term ---
     if q:
@@ -320,16 +338,12 @@ async def search_rules(
     return paginated_items
 
 @router.get("/{rule_id}", response_model=ParsedRule)
-async def get_rule(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
+async def get_rule(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    return _get_tenant_rule(rule_id, tenant_id)
 
 @router.post("/{rule_id}/deprecate")
-async def deprecate_rule(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-
-    rule = INGESTED_RULES[rule_id]
+async def deprecate_rule(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    rule = _get_tenant_rule(rule_id, tenant_id)
     rule.is_active = False
 
     try:
@@ -355,11 +369,8 @@ async def deprecate_rule(rule_id: str):
 
 
 @router.get("/{rule_id}/dependencies")
-async def get_rule_dependencies(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-
-    rule = INGESTED_RULES[rule_id]
+async def get_rule_dependencies(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    rule = _get_tenant_rule(rule_id, tenant_id)
     dependencies = dependency_tracker.get_dependents(rule.content_hash)
 
     return {
@@ -379,7 +390,7 @@ async def get_rule_dependencies(rule_id: str):
 
 
 @router.post("/{rule_id}/dependencies")
-async def record_rule_dependency(rule_id: str, payload: Dict[str, object], response: Response):
+async def record_rule_dependency(rule_id: str, payload: Dict[str, object], response: Response, tenant_id: str = Depends(get_current_tenant)):
     if rule_id not in INGESTED_RULES:
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
 
@@ -407,6 +418,7 @@ async def record_rule_dependency(rule_id: str, payload: Dict[str, object], respo
         dependent_type,
         dependent_id,
         metadata=metadata,
+        tenant_id=tenant_id,
     )
     response.status_code = status.HTTP_201_CREATED
 
@@ -419,11 +431,8 @@ async def record_rule_dependency(rule_id: str, payload: Dict[str, object], respo
 
 
 @router.get("/{rule_id}/impact")
-async def get_rule_impact(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-
-    rule = INGESTED_RULES[rule_id]
+async def get_rule_impact(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    rule = _get_tenant_rule(rule_id, tenant_id)
     dependencies = dependency_tracker.get_dependents(rule.content_hash)
 
     return {
@@ -444,11 +453,8 @@ async def get_rule_impact(rule_id: str):
 
 
 @router.post("/{rule_id}/restore")
-async def restore_rule(rule_id: str):
-    if rule_id not in INGESTED_RULES:
-        raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
-
-    rule = INGESTED_RULES[rule_id]
+async def restore_rule(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
+    rule = _get_tenant_rule(rule_id, tenant_id)
     rule.is_active = True
 
     try:
@@ -464,7 +470,7 @@ async def restore_rule(rule_id: str):
 
 
 @router.get("/{rule_id}/versions")
-async def get_rule_versions(rule_id: str):
+async def get_rule_versions(rule_id: str, tenant_id: str = Depends(get_current_tenant)):
     history = rule_versioning_service.get_history(rule_id)
 
     if not history and rule_id not in INGESTED_RULES:
@@ -476,7 +482,7 @@ async def get_rule_versions(rule_id: str):
 
 
 @router.get("/{rule_id}/versions/{version}")
-async def get_rule_version(rule_id: str, version: int):
+async def get_rule_version(rule_id: str, version: int, tenant_id: str = Depends(get_current_tenant)):
     if rule_id not in INGESTED_RULES and not rule_versioning_service.get_history(rule_id):
         raise HTTPException(status_code=404, detail=f"Rule with ID {rule_id} not found")
 

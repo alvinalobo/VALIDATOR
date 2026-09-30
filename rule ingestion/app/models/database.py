@@ -1,7 +1,7 @@
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import JSON
 import uuid
 
 revision = "001_create_detection_rules"
@@ -15,7 +15,7 @@ def upgrade():
         "detection_rules",
         sa.Column(
             "id",
-            UUID(as_uuid=True),
+            sa.String(36),
             primary_key=True,
             default=uuid.uuid4
         ),
@@ -35,7 +35,7 @@ def upgrade():
 
         sa.Column(
             "parent_rule_id",
-            UUID(as_uuid=True),
+            sa.String(36),
             nullable=True
         ),
 
@@ -110,29 +110,29 @@ def upgrade():
 
         sa.Column(
             "validation_errors",
-            JSONB,
+            JSON,
             nullable=False,
-            server_default=sa.text("'[]'::jsonb")
+            server_default=sa.text("'[]'")
         ),
 
         sa.Column(
             "mitre_techniques",
-            JSONB,
+            JSON,
             nullable=False,
-            server_default=sa.text("'[]'::jsonb")
+            server_default=sa.text("'[]'")
         ),
 
         sa.Column(
             "detection_logic",
-            JSONB,
+            JSON,
             nullable=False
         ),
 
         sa.Column(
             "tags",
-            JSONB,
+            JSON,
             nullable=False,
-            server_default=sa.text("'[]'::jsonb")
+            server_default=sa.text("'[]'")
         ),
 
         sa.Column(

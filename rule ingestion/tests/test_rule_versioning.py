@@ -21,6 +21,7 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from fastapi.testclient import TestClient
+from jose import jwt
 
 from app.main import app
 from app.api.rules import INGESTED_RULES
@@ -35,7 +36,15 @@ from app.services.rule_versioning import (
     rule_versioning_service,
 )
 
-client = TestClient(app)
+os.environ["SECRET_KEY"] = "test-secret-key"
+
+_TEST_TOKEN = jwt.encode(
+    {"tenant_id": "test-tenant"},
+    os.environ["SECRET_KEY"],
+    algorithm="HS256",
+)
+
+client = TestClient(app, headers={"Authorization": f"Bearer {_TEST_TOKEN}"})
 
 
 def h(char: str) -> str:
@@ -58,6 +67,7 @@ def clean_state():
 
 def _make_rule(rule_id: str, content_hash: str, title: str = "Test Rule") -> ParsedRule:
     return ParsedRule(
+        tenant_id="test-tenant",
         rule_id=rule_id,
         title=title,
         content_hash=content_hash,

@@ -54,6 +54,7 @@ class RuleDependencyTracker:
         dependent_type: str,
         dependent_id: str,
         metadata: Optional[Dict[str, str]] = None,
+        tenant_id: Optional[str] = None,
     ) -> None:
         """Record that `dependent_id` (a validation run, re-validation
         run, or action) used rule `rule_id`. Call this every time the
@@ -78,7 +79,7 @@ class RuleDependencyTracker:
                 try:
                     rule = (
                         db.query(DetectionRule)
-                        .filter(DetectionRule.content_hash == rule_id)
+                        .filter(DetectionRule.content_hash == rule_id, DetectionRule.tenant_id == tenant_id)
                         .first()
                     )
                     if rule is not None:

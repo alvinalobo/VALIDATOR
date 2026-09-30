@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from importlib import import_module
 
@@ -7,11 +7,13 @@ from app.services.health_monitor import (
     monitor,
     ConnectorHealthStatus,
 )
+from app.security.security import get_current_claims
 
 
 router = APIRouter(
     prefix="/api/v2/connectors",
     tags=["Connectors"],
+    dependencies=[Depends(get_current_claims)],
 )
 
 

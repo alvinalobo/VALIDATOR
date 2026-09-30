@@ -12,6 +12,7 @@ class DetectionRule(Base):
     __tablename__ = "detection_rules"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     rule_id: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
     parent_rule_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -39,6 +40,6 @@ class DetectionRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("rule_id", "version", name="uq_rule_version"),
-        UniqueConstraint("content_hash", name="uq_content_hash"),
+        UniqueConstraint("tenant_id", "rule_id", "version", name="uq_tenant_rule_version"),
+        UniqueConstraint("tenant_id", "content_hash", name="uq_tenant_content_hash"),
     )

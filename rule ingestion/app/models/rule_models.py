@@ -111,6 +111,7 @@ class ParsedRule(BaseModel):
         created_at: When rule was created
         updated_at: When rule was last updated
     """
+    tenant_id: Optional[str] = Field(default=None, description="Tenant that owns the rule")
     rule_id: str = Field(
         ...,
         min_length=1,
