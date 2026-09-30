@@ -6,6 +6,9 @@ import os
 import hashlib
 import shutil
 import git
+import ipaddress
+import socket
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 from app.models.rule_models import RuleIngestRequest, ParsedRule, RuleFormatEnum, PaginatedRuleResponse
@@ -34,28 +37,66 @@ class RuleSearchResponse(BaseModel):
     page_size: int
     total_pages: int
 
-def clone_repo(repo_url: str, branch: str = 'main') -> str:
-    # If repo_url is a local path, use it directly
+def _validate_clone_url(repo_url: str) -> None:
+    """Reject non-HTTP(S) URLs and destinations that resolve to private/internal IPs."""
+    parsed = urlparse(repo_url)
+
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("repo_url must be an HTTP(S) Git URL")
+
+    hostname = parsed.hostname
+
+    try:
+        addresses = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+        raise ValueError("repo_url hostname could not be resolved") from exc
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError("repo_url resolves to a non-public IP address")
+
+
+def clone_repo(repo_url: str, branch: str = "main", depth: int = 1) -> str:
+    # Local fixture/directories are supported for tests and trusted local use.
     if os.path.exists(repo_url) and os.path.isdir(repo_url):
         return os.path.abspath(repo_url)
-        
-    # Generate unique directory name
-    h = hashlib.sha256(repo_url.encode('utf-8')).hexdigest()[:12]
-    workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".cloned_repos"))
+
+    _validate_clone_url(repo_url)
+
+    h = hashlib.sha256(repo_url.encode("utf-8")).hexdigest()[:12]
+    workspace_dir = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", ".cloned_repos"
+        )
+    )
     os.makedirs(workspace_dir, exist_ok=True)
     repo_path = os.path.join(workspace_dir, f"{h}_{branch}")
-    
+
     if os.path.exists(repo_path):
         try:
             repo = git.Repo(repo_path)
-            repo.remotes.origin.fetch()
+            repo.remotes.origin.fetch(depth=depth)
             repo.git.checkout(branch)
-            repo.git.reset('--hard', f'origin/{branch}')
+            repo.git.reset("--hard", f"origin/{branch}")
             return repo_path
         except Exception:
             shutil.rmtree(repo_path, ignore_errors=True)
-            
-    git.Repo.clone_from(repo_url, repo_path, branch=branch)
+
+    git.Repo.clone_from(
+        repo_url,
+        repo_path,
+        branch=branch,
+        depth=depth,
+        single_branch=True,
+    )
     return repo_path
 
 def discover_rule_files(repo_path: str, rule_types: List[str]) -> List[str]:

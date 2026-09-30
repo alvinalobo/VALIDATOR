@@ -23,11 +23,23 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from fastapi.testclient import TestClient
+from jose import jwt
 
 from app.main import app
 from app.api.rules import INGESTED_RULES
+from app.services.database import create_tables
 
-client = TestClient(app)
+os.environ["SECRET_KEY"] = "test-secret-key"
+_TEST_TOKEN = jwt.encode(
+    {"tenant_id": "test-tenant"},
+    os.environ["SECRET_KEY"],
+    algorithm="HS256",
+)
+
+client = TestClient(
+    app,
+    headers={"Authorization": f"Bearer {_TEST_TOKEN}"},
+)
 
 FIXTURE_REPO = Path(__file__).resolve().parent / "fixtures" / "rule_repo"
 SIGMA_DIR = FIXTURE_REPO / "sigma"
@@ -36,6 +48,7 @@ KQL_DIR = FIXTURE_REPO / "kql"
 
 @pytest.fixture(autouse=True)
 def clean_ingested_rules():
+    create_tables()
     INGESTED_RULES.clear()
     yield
     INGESTED_RULES.clear()
