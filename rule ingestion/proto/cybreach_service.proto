@@ -1,0 +1,280 @@
+syntax = "proto3";
+
+package cybreach.services;
+
+option go_package = "github.com/cybreach/cybreach-module2/pb/cybreach/services";
+option java_multiple_files = true;
+option java_package = "com.cybreach.services";
+option java_outer_classname = "CybreachServiceProto";
+option py_generic_services = true;
+
+/**
+ * CyBreach Module 2 Inter-Pod gRPC Contract (M9)
+ * 
+ * This is the frozen source of truth for all cross-pod RPC channels.
+ * Every inter-pod service call must route through these service definitions.
+ * 
+ * Pod mappings:
+ *   - Alpha (Rule Ingestion): RuleIngestService, RuleQueryService
+ *   - Beta (Validation Engine): ValidationService, ClassificationService
+ *   - Gamma (OCSF Normalizer): NormalizationService, RevalidationService
+ *   - Delta (Verdict Publisher): VerdictPublisherService
+ */
+
+// ============================================================================
+// ALPHA (Rule Ingestion + Connector Framework)
+// ============================================================================
+
+/**
+ * RuleIngestService: Alpha exposes the rule store and ingest surface.
+ * Called by: Beta (to fetch rules), Gamma (to query rules for revalidation),
+ * Delta (to populate rule cache on startup).
+ */
+service RuleIngestService {
+  /**
+   * FetchRules: Retrieve rules matching a rule query.
+   * Used by: Beta's Validation Engine to load detection rules.
+   */
+  rpc FetchRules(RuleQueryRequest) returns (RuleQueryResponse);
+  
+  /**
+   * GetRule: Retrieve a single rule by ID.
+   * Used by: Delta's Verdict Publisher to hydrate rule metadata in verdicts.
+   */
+  rpc GetRule(GetRuleRequest) returns (RuleDetail);
+  
+  /**
+   * HealthCheck: Probe the rule store.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message RuleQueryRequest {
+  string tenant_id = 1;
+  string rule_query = 2;  // The detection rule query string
+  int32 limit = 3;
+}
+
+message RuleQueryResponse {
+  repeated RuleDetail rules = 1;
+  string status = 2;
+}
+
+message GetRuleRequest {
+  string tenant_id = 1;
+  string rule_id = 2;
+}
+
+message RuleDetail {
+  string rule_id = 1;
+  string rule_name = 2;
+  string rule_query = 3;
+  string source = 4;
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+// ============================================================================
+// BETA (Validation Engine + Outcome Classifier)
+// ============================================================================
+
+/**
+ * ValidationService: Beta's Validation Engine exposes the validation RPC.
+ * Called by: Gamma (to revalidate evidence), Delta (to batch-validate on demand).
+ */
+service ValidationService {
+  /**
+   * Validate: Run evidence through the validation engine.
+   * Used by: Gamma's Revalidation Service and Delta's batch API.
+   */
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  
+  /**
+   * BatchValidate: Validate multiple evidence items in one call.
+   */
+  rpc BatchValidate(BatchValidateRequest) returns (BatchValidateResponse);
+  
+  /**
+   * HealthCheck: Probe the validation engine.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message ValidateRequest {
+  string tenant_id = 1;
+  string evidence_id = 2;
+  bytes normalized_event = 3;  // Serialized OCSF event from Gamma
+  repeated string rule_ids = 4;
+}
+
+message ValidateResponse {
+  string verdict_id = 1;
+  string status = 2;  // "valid", "invalid", "error"
+  repeated string matched_rules = 3;
+  string error_detail = 4;
+}
+
+message BatchValidateRequest {
+  string tenant_id = 1;
+  repeated ValidateRequest requests = 2;
+}
+
+message BatchValidateResponse {
+  repeated ValidateResponse responses = 1;
+  int32 success_count = 2;
+  int32 failed_count = 3;
+}
+
+/**
+ * ClassificationService: Beta's Outcome Classifier exposes the classification RPC.
+ * Called by: Delta (to classify verdicts into risk categories).
+ */
+service ClassificationService {
+  /**
+   * Classify: Classify a verdict into outcome categories.
+   * Used by: Delta's Verdict Publisher to categorize before publishing.
+   */
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
+  
+  /**
+   * HealthCheck: Probe the classifier.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message ClassifyRequest {
+  string tenant_id = 1;
+  string verdict_id = 2;
+  repeated string matched_rules = 3;
+  int32 match_count = 4;
+}
+
+message ClassifyResponse {
+  string verdict_id = 1;
+  string risk_level = 2;  // "critical", "high", "medium", "low", "info"
+  repeated string causal_chain = 3;
+  string classification_detail = 4;
+}
+
+// ============================================================================
+// GAMMA (OCSF Normalizer + Re-Validation Service)
+// ============================================================================
+
+/**
+ * NormalizationService: Gamma's OCSF Normalizer exposes normalization RPC.
+ * Called by: Beta (to normalize evidence before validation, in some flows).
+ */
+service NormalizationService {
+  /**
+   * Normalize: Transform raw evidence into OCSF event format.
+   * Used by: Alpha/Beta to normalize evidence before validation.
+   */
+  rpc Normalize(NormalizeRequest) returns (NormalizeResponse);
+  
+  /**
+   * HealthCheck: Probe the normalizer.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message NormalizeRequest {
+  string tenant_id = 1;
+  string evidence_id = 2;
+  string source_format = 3;  // "raw", "json", "syslog", etc.
+  bytes raw_data = 4;
+}
+
+message NormalizeResponse {
+  string evidence_id = 1;
+  bytes normalized_event = 2;  // Serialized OCSF event
+  string status = 3;
+  string error_detail = 4;
+}
+
+/**
+ * RevalidationService: Gamma's Revalidation Service exposes the revalidation RPC.
+ * Called by: Delta (to revalidate verdicts after rule updates).
+ */
+service RevalidationService {
+  /**
+   * Revalidate: Rerun validation on a previously validated evidence item.
+   * Used by: Delta's Verdict Publisher to check if verdicts are still valid.
+   */
+  rpc Revalidate(RevalidateRequest) returns (RevalidateResponse);
+  
+  /**
+   * HealthCheck: Probe the revalidation service.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message RevalidateRequest {
+  string tenant_id = 1;
+  string verdict_id = 2;
+  bytes evidence_data = 3;
+  repeated string original_rules = 4;
+}
+
+message RevalidateResponse {
+  string verdict_id = 1;
+  bool still_valid = 2;
+  repeated string current_rules = 3;
+  string status = 4;
+  string gap_closed = 5;  // "yes", "no", "unknown"
+}
+
+// ============================================================================
+// DELTA (Verdict Publisher + API Gateway)
+// ============================================================================
+
+/**
+ * VerdictPublisherService: Delta's Verdict Publisher exposes the verdict RPC.
+ * Called by: Beta (to publish verdicts after validation/classification).
+ */
+service VerdictPublisherService {
+  /**
+   * PublishVerdict: Publish a verdict to the output channel (WebSocket, Kafka, REST).
+   * Used by: Beta to emit verdicts after classification.
+   */
+  rpc PublishVerdict(PublishVerdictRequest) returns (PublishVerdictResponse);
+  
+  /**
+   * HealthCheck: Probe the verdict publisher.
+   */
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+}
+
+message PublishVerdictRequest {
+  string tenant_id = 1;
+  string verdict_id = 2;
+  string evidence_id = 3;
+  string risk_level = 4;
+  repeated string causal_chain = 5;
+  string content_hash = 6;
+  string rule_id = 7;
+}
+
+message PublishVerdictResponse {
+  string verdict_id = 1;
+  string status = 2;  // "published", "queued", "error"
+  string error_detail = 3;
+}
+
+// ============================================================================
+// COMMON / SHARED
+// ============================================================================
+
+/**
+ * HealthRequest / HealthResponse: Standard health probe across all services.
+ * Every service must implement HealthCheck at the RPC level.
+ */
+message HealthRequest {
+  string service_name = 1;
+}
+
+message HealthResponse {
+  string status = 1;  // "ok", "degraded", "down"
+  string service = 2;
+  int64 timestamp = 3;
+  string version = 4;
+}

@@ -11,8 +11,12 @@ Interactive documentation is served at:
     /docs      Swagger UI
     /redoc     ReDoc
     /openapi.json
+
+M9 (2026-09-30): Added gRPC server start on port 50051 for inter-pod
+communication via RuleIngestService (FetchRules, GetRule, HealthCheck).
 """
 
+import threading
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -50,6 +54,13 @@ that past verdicts remain reproducible after a rule changes.
   dependencies back through `/api/v2/rules/{rule_id}/dependencies`.
 * **Pod Gamma / Pod Delta** consume the connector health and registration
   surfaces.
+
+### Inter-Pod Communication (M9)
+
+* **gRPC Server** on port 50051 exposes `RuleIngestService` for internal
+  pod-to-pod queries (Beta's rule fetching, Delta's rule hydration,
+  Gamma's revalidation). See `app/grpc_server.py` for implementation.
+* **Protocol contract** at `proto/cybreach_service.proto` (shared across all pods).
 """
 
 TAGS_METADATA = [
@@ -91,6 +102,21 @@ load_plugins()
 
 app.include_router(connector_router)
 app.include_router(rule_router)
+
+
+@app.on_event("startup")
+def start_grpc_server():
+    """
+    Start gRPC server in a background thread on app startup.
+    M9 closure: internal service plumbing is now live.
+    """
+    from app import grpc_server
+
+    grpc_thread = threading.Thread(
+        target=lambda: grpc_server.serve(host="0.0.0.0", port=50051),
+        daemon=True,
+    )
+    grpc_thread.start()
 
 
 @app.get("/", tags=["health"], summary="Service banner")
