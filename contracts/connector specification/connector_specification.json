@@ -12,17 +12,17 @@
       "type": "string",
       "description": "Version of the connector."
     },
-    "siem_platform": {
-      "type": "string",
-      "enum": [
-        "Splunk",
-        "Microsoft Sentinel",
-        "IBM QRadar",
-        "Elastic",
-        "crowdstrike"
-      ],
-      "description": "Target SIEM platform."
-    },
+"siem_platform": {
+   "type": "string",
+   "enum": [
+    "splunk",
+    "sentinel",
+    "elastic",
+    "qradar",
+    "crowdstrike_logscale"
+   ],
+   "description": "Target SIEM platform (lowercase registry slug; display names are labels)."
+  },
     "supported_query_language": {
       "type": "string",
       "description": "Query language used by the SIEM."
