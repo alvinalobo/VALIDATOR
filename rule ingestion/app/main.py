@@ -14,9 +14,12 @@ Interactive documentation is served at:
 """
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from app.api.connector_routes import router as connector_router
 from app.api.rules import router as rule_router
+from app.services.database import engine
 from app.connector.plugin_loader import load_plugins
 
 DESCRIPTION = """
@@ -96,7 +99,15 @@ def home():
     return {"message": "Rule Ingestion Service is running"}
 
 
-@app.get("/health", tags=["health"], summary="Liveness check")
+@app.get("/health", tags=["health"], summary="Service health check")
 def health():
-    """Returns healthy once the application has started and plugins loaded."""
-    return {"status": "healthy"}
+    """Check that the service can reach its database."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "healthy"}
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "database": "unhealthy"},
+        )
