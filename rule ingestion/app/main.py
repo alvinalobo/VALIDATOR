@@ -16,7 +16,9 @@ M9 (2026-09-30): Added gRPC server start on port 50051 for inter-pod
 communication via RuleIngestService (FetchRules, GetRule, HealthCheck).
 """
 
+import logging
 import threading
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -25,6 +27,8 @@ from app.api.connector_routes import router as connector_router
 from app.api.rules import router as rule_router
 from app.services.database import engine
 from app.connector.plugin_loader import load_plugins
+
+logger = logging.getLogger(__name__)
 
 DESCRIPTION = """
 The **Rule Ingestion Service** is the Module 1 component of The Validator. It
@@ -108,9 +112,29 @@ app.include_router(rule_router)
 def start_grpc_server():
     """
     Start gRPC server in a background thread on app startup.
-    M9 closure: internal service plumbing is now live.
+
+    M9: the transport is NOT live -- REST remains the sanctioned cross-pod
+    transport, and these prototypes must not be served as written (they use
+    `add_insecure_port`, which would expose tenant-scoped rule reads on an
+    unauthenticated front door, bypassing the B11 JWT gate). Beta therefore
+    keeps `ALPHA_GRPC_ENABLED` off by default and falls back to REST.
+
+    The import is guarded so the REST service still starts when the gRPC extras
+    are absent. `grpc_server` needs generated protobuf stubs (`*_pb2`), which
+    are a build artifact and deliberately not committed; an unguarded import
+    here turned that into a hard startup failure that took the whole REST
+    service down over an inert, disabled prototype.
     """
-    from app import grpc_server
+    try:
+        from app import grpc_server
+    except Exception as exc:
+        logger.warning(
+            "gRPC prototype not started (%s); REST is unaffected. Generate the "
+            "stubs with: python -m grpc_tools.protoc -I proto --python_out=. "
+            "--grpc_python_out=. proto/cybreach_service.proto",
+            exc,
+        )
+        return
 
     grpc_thread = threading.Thread(
         target=lambda: grpc_server.serve(host="0.0.0.0", port=50051),
